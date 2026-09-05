@@ -13,19 +13,58 @@ from server.utils import is_generic_title, sanitize_filename
 logger = logging.getLogger("video_dl.cleanup")
 
 
+def _is_task_file(candidate_abs: str, targets: set) -> bool:
+    """Checks whether candidate_abs strictly matches any tracked target path or its partial/format variants."""
+    if not targets:
+        return False
+
+    cand_lower = os.path.abspath(candidate_abs).lower()
+    cand_dir = os.path.dirname(cand_lower)
+    cand_fn = os.path.basename(cand_lower)
+
+    for t in targets:
+        t_lower = os.path.abspath(t).lower()
+        t_dir = os.path.dirname(t_lower)
+        if cand_dir != t_dir:
+            continue
+        t_fn = os.path.basename(t_lower)
+
+        # 1. Exact match
+        if cand_fn == t_fn:
+            return True
+
+        # 2. Suffix / fragment match: target.mp4.part, target.mp4.ytdl, target.mp4.part-Frag*.part
+        if cand_fn.startswith(t_fn + ".") or cand_fn.startswith(t_fn + "-"):
+            return True
+
+        # 3. Base stream variants (e.g. format streams target.f137.mp4.part or target.temp.mp4)
+        base_fn, _ = os.path.splitext(t_fn)
+        if base_fn and cand_fn.startswith(base_fn + "."):
+            if cand_fn.startswith(base_fn + ".temp.") or cand_fn == (base_fn + ".temp"):
+                return True
+            if re.search(r"^" + re.escape(base_fn) + r"\.f(\d+|ba|bv|hls|dash|audio|video|[0-9]+p)[a-zA-Z0-9_-]*\.(mp4|m4a|webm|mkv|mp3|ogg|wav|aac|flv|ts)(\.|$)", cand_fn):
+                return True
+
+    return False
+
+
 def release_file_handles(download_dir: str, task_filepaths: Optional[Iterable[str]] = None) -> int:
     """
-    Scans for open Python file streams (io.IOBase) within download_dir or matching
-    tracked task filepaths, closes them, and forces cyclic garbage collection.
-    This prevents Windows from locking files with [WinError 32] after cancellation.
+    Scans for open Python file streams (io.IOBase) matching tracked task filepaths,
+    closes them, and forces cyclic garbage collection.
+    This prevents Windows from locking files with [WinError 32] after cancellation
+    without disturbing other concurrent downloads in the same directory.
     """
     closed_count = 0
-    target_dir = os.path.abspath(download_dir).lower()
     targets = set()
     if task_filepaths:
         for p in task_filepaths:
             if p:
                 targets.add(os.path.abspath(p).lower())
+
+    if not targets:
+        gc.collect()
+        return 0
 
     for obj in gc.get_objects():
         try:
@@ -33,7 +72,7 @@ def release_file_handles(download_dir: str, task_filepaths: Optional[Iterable[st
                 name = getattr(obj, "name", None)
                 if name and isinstance(name, str):
                     abs_name = os.path.abspath(name).lower()
-                    if abs_name.startswith(target_dir) or any(abs_name.startswith(t) for t in targets):
+                    if _is_task_file(abs_name, targets):
                         try:
                             obj.close()
                             closed_count += 1
@@ -78,15 +117,24 @@ def cleanup_task_files(task: DownloadTask, download_dir: Optional[str] = None) -
     if not download_dir or not os.path.exists(download_dir):
         return []
 
-    # Ensure any open Python file streams are closed and garbage collected first
-    all_tracked = set(task.tracked_files)
-    if task.filepath:
-        all_tracked.add(os.path.abspath(task.filepath))
-    release_file_handles(download_dir, all_tracked)
-
     target_filename = task.filename or (os.path.basename(task.filepath) if task.filepath else None)
     clean_title = sanitize_filename(task.title) if (task.title and not is_generic_title(task.title)) else None
     task_started_at = task.started_at or task.created_at
+
+    # Build comprehensive target paths for this task
+    all_tracked = set()
+    for f in task.tracked_files:
+        if f:
+            all_tracked.add(os.path.abspath(f))
+    if task.filepath:
+        all_tracked.add(os.path.abspath(task.filepath))
+    elif target_filename:
+        all_tracked.add(os.path.abspath(os.path.join(download_dir, target_filename)))
+    elif clean_title:
+        all_tracked.add(os.path.abspath(os.path.join(download_dir, clean_title)))
+
+    # Ensure open Python file streams belonging to THIS task are closed first
+    release_file_handles(download_dir, all_tracked)
 
     deleted = []
     try:
@@ -101,46 +149,48 @@ def cleanup_task_files(task: DownloadTask, download_dir: Optional[str] = None) -
             continue
 
         should_remove = False
-        fp_abs = os.path.abspath(fp).lower()
+        fp_abs = os.path.abspath(fp)
+        fn_lower = fn.lower()
 
-        # Check if explicitly tracked
-        for tracked in all_tracked:
-            t_lower = tracked.lower()
-            if fp_abs == t_lower or fp_abs.startswith(t_lower + ".") or fp_abs.startswith(t_lower + "-"):
-                should_remove = True
-                break
+        try:
+            mtime = os.path.getmtime(fp)
+        except OSError:
+            mtime = 0
 
-        # If not already matched, match via filename / title patterns
-        if not should_remove:
-            try:
-                mtime = os.path.getmtime(fp)
-            except OSError:
-                mtime = 0
+        # Check if the file strictly belongs to this task
+        if _is_task_file(fp_abs, all_tracked):
+            # If it is the exact finished output file, only delete if modified during this task run
+            # to avoid deleting pre-existing completed files.
+            is_exact_output = False
+            for t in all_tracked:
+                if fp_abs.lower() == os.path.abspath(t).lower():
+                    is_exact_output = True
+                    break
 
-            fn_lower = fn.lower()
-            is_temp_or_part = any(ext in fn_lower for ext in [".part", ".ytdl", ".temp"])
-
-            # 1. Exact match with target_filename (incomplete output file modified during task)
-            if target_filename and fn_lower == target_filename.lower():
+            if is_exact_output:
                 if mtime >= (task_started_at - 2):
                     should_remove = True
-
-            # 2. Starts with target_filename (e.g. video.mp4.part, video.mp4.ytdl, video.mp4.part-Frag29.part)
-            elif target_filename and (fn_lower.startswith(target_filename.lower() + ".") or fn_lower.startswith(target_filename.lower() + "-")):
+            else:
+                # Suffixes (.part, .ytdl, -Frag*.part, .temp, .f<fmt>.) belonging to this task
                 should_remove = True
 
-            # 3. Base matching (e.g. video.f137.mp4, video.f137.mp4.part, video.f140.m4a.part)
-            elif target_filename:
-                base, _ = os.path.splitext(target_filename)
-                if base and fn_lower.startswith(base.lower() + "."):
-                    if is_temp_or_part or re.search(r"\.f[a-zA-Z0-9_-]+\.", fn_lower) or mtime >= (task_started_at - 2):
-                        should_remove = True
-
-            # 4. Clean title matching if target_filename wasn't resolved yet
-            if not should_remove and clean_title:
-                ct_lower = clean_title.lower()
-                if fn_lower.startswith(ct_lower + "."):
-                    if is_temp_or_part or re.search(r"\.f[a-zA-Z0-9_-]+\.", fn_lower) or mtime >= (task_started_at - 2):
+        # Fallback: if filename was not known and title was used
+        elif not target_filename and clean_title:
+            ct_lower = clean_title.lower()
+            if fn_lower.startswith(ct_lower + "."):
+                is_temp_or_part = any(ext in fn_lower for ext in [".part", ".ytdl", ".temp"])
+                is_format_stream = bool(re.search(
+                    r"^" + re.escape(ct_lower) + r"\.f(\d+|ba|bv|hls|dash|audio|video|[0-9]+p)[a-zA-Z0-9_-]*\.(mp4|m4a|webm|mkv|mp3|ogg|wav|aac|flv|ts)(\.|$)",
+                    fn_lower
+                ))
+                is_title_temp_media = bool(re.search(
+                    r"^" + re.escape(ct_lower) + r"\.(mp4|m4a|webm|mkv|mp3|ogg|wav|aac|flv|ts)(\.(part|ytdl|temp))(-frag\d+\.part)?$",
+                    fn_lower
+                ))
+                if is_format_stream or is_title_temp_media or fn_lower.startswith(ct_lower + ".temp.") or fn_lower == (ct_lower + ".temp"):
+                    should_remove = True
+                elif is_temp_or_part and mtime >= (task_started_at - 2):
+                    if re.match(r"^" + re.escape(ct_lower) + r"\.[a-zA-Z0-9]{2,5}\.(part|ytdl)", fn_lower):
                         should_remove = True
 
         if should_remove:
@@ -151,3 +201,4 @@ def cleanup_task_files(task: DownloadTask, download_dir: Optional[str] = None) -
     if deleted:
         logger.info(f"Task {task.id} cleanup deleted {len(deleted)} file(s): {[os.path.basename(f) for f in deleted]}")
     return deleted
+

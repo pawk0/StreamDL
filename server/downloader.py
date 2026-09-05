@@ -174,6 +174,7 @@ class DownloadManager:
                                 continue
 
                             # Start task in background thread
+                            task.status = "downloading"
                             th = threading.Thread(
                                 target=self._execute_download,
                                 args=(task,),

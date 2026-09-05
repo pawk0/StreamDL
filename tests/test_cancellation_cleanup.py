@@ -229,3 +229,121 @@ def test_real_ytdlp_hls_cancellation_cleans_up_and_unlocks(manager, tmp_path):
         httpd.shutdown()
         httpd.server_close()
 
+
+def test_cancellation_does_not_interrupt_concurrent_downloads(tmp_path):
+    """
+    Cancelling one active download must NOT close open file handles of other
+    concurrent downloads running in the same download directory.
+    """
+    download_dir = str(tmp_path)
+    save_settings({"download_dir": download_dir})
+
+    # Task A: cancelled task
+    task_a = DownloadTask(task_id="task_a", url="https://example.com/a", title="Task A")
+    task_a.filename = "Task A.mp4"
+    task_a.filepath = os.path.join(download_dir, "Task A.mp4")
+    task_a.tracked_files.add(os.path.join(download_dir, "Task A.mp4.part"))
+    task_a.status = "cancelled"
+    task_a.started_at = time.time()
+
+    # Create Task A partial file
+    task_a_part = os.path.join(download_dir, "Task A.mp4.part")
+    with open(task_a_part, "wb") as fa:
+        fa.write(b"data_a")
+
+    # Task B: concurrent active download with an open file stream
+    task_b_part = os.path.join(download_dir, "Concurrent Task B.mp4.part")
+    concurrent_handle = open(task_b_part, "wb")
+    concurrent_handle.write(b"initial_data_b")
+    concurrent_handle.flush()
+
+    try:
+        # Run cleanup for Task A
+        deleted = cleanup_task_files(task_a, download_dir)
+
+        # Task A files should be deleted
+        assert not os.path.exists(task_a_part)
+        assert task_a_part in deleted
+
+        # Concurrent task's handle MUST still be open and writable
+        assert not concurrent_handle.closed, "Concurrent task handle was closed by Task A cleanup!"
+        # Writing to the concurrent handle must succeed and not raise 'write to closed file'
+        concurrent_handle.write(b"more_data_b")
+        concurrent_handle.flush()
+
+        # Concurrent task's file must still exist
+        assert os.path.exists(task_b_part)
+    finally:
+        concurrent_handle.close()
+
+
+@pytest.mark.parametrize(
+    "cancelled_name,similar_name",
+    [
+        ("2025.mp4", "2025_1.mp4"),
+        ("2025.mp4", "2025_2.mp4"),
+        ("2025.mp4", "2025.1.mp4"),
+        ("2025.mp4", "2025.special.mp4"),
+        ("2025.mp4", "2025.final.mp4"),
+        ("2025.mp4", "2025 Episode 1.mp4"),
+        ("2025.mp4", "2025-01.mp4"),
+        ("2025.mp4", "202501.mp4"),
+        ("Video.mp4", "Video 2.mp4"),
+        ("Video.mp4", "Video.Season1.mp4"),
+    ],
+)
+def test_cancellation_does_not_affect_files_with_similar_names(tmp_path, cancelled_name, similar_name):
+    """
+    Cancelling a download (e.g. 2025.mp4) must NOT close handles or delete
+    files of similarly named downloads (e.g. 2025_1.mp4, 2025_2.mp4, 2025.1.mp4).
+    """
+    download_dir = str(tmp_path)
+    save_settings({"download_dir": download_dir})
+
+    base_title = os.path.splitext(cancelled_name)[0]
+    task = DownloadTask(task_id="test_cancel", url=f"https://example.com/{base_title}", title=base_title)
+    task.filename = cancelled_name
+    task.filepath = os.path.join(download_dir, cancelled_name)
+    task.status = "cancelled"
+    task.started_at = time.time()
+
+    # Create cancelled task partial files
+    files_to_cancel = [
+        os.path.join(download_dir, f"{cancelled_name}.part"),
+        os.path.join(download_dir, f"{cancelled_name}.ytdl"),
+        os.path.join(download_dir, f"{cancelled_name}.part-Frag2.part"),
+    ]
+    for f in files_to_cancel:
+        task.tracked_files.add(f)
+        with open(f, "wb") as h:
+            h.write(b"cancelled_task_data")
+
+    # Create similarly named active file and keep an open file handle
+    similar_part = os.path.join(download_dir, f"{similar_name}.part")
+    similar_handle = open(similar_part, "wb")
+    similar_handle.write(b"active_similar_data")
+    similar_handle.flush()
+
+    try:
+        # Run cleanup on the cancelled task
+        deleted = cleanup_task_files(task, download_dir)
+
+        # Cancelled files must be removed
+        for f in files_to_cancel:
+            assert not os.path.exists(f), f"Expected {f} to be deleted!"
+            assert f in deleted
+
+        # Similarly named file MUST NOT be deleted
+        assert os.path.exists(similar_part), f"Similar file {similar_name}.part was wrongly deleted!"
+        assert similar_part not in deleted
+
+        # Handle for similarly named task MUST still be open and writable
+        assert not similar_handle.closed, f"Handle for {similar_name}.part was closed by cleanup!"
+
+        similar_handle.write(b"_additional_bytes")
+        similar_handle.flush()
+    finally:
+        similar_handle.close()
+
+
+

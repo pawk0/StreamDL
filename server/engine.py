@@ -134,6 +134,13 @@ def execute_download(
         download_dir = settings.get("download_dir")
     os.makedirs(download_dir, exist_ok=True)
 
+    if task.cancel_requested or task.status == "cancelled":
+        logger.info(f"Task {task.id} was cancelled before download began.")
+        task.status = "cancelled"
+        task.completed_at = time.time()
+        cleanup_task_files(task, download_dir)
+        return
+
     task.status = "downloading"
     task.started_at = time.time()
     logger.info(f"Starting download for task {task.id}: {task.url}")
