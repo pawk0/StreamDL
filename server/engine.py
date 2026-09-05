@@ -133,12 +133,25 @@ def execute_download(
     """
     Executes a single DownloadTask using yt-dlp, handling progress tracking,
     embed resolution, pre-extraction, and cleanup on failure or cancellation.
+
+    Cancellation & Exception Unwinding Rationale:
+    When aborting downloads via exceptions in callbacks/hooks (e.g. yt-dlp progress hooks),
+    third-party engines often skip internal cleanup routines like _finish_frag_download.
+    Unhandled exception tracebacks retain frame locals and closures in cyclic memory,
+    keeping underlying file handles (io.BufferedWriter / _io.FileIO) open and locking files
+    on Windows ([WinError 32]).
+    To release handles safely on cancellation/failure, execution engines must:
+      1. Identify and call .close() on task-scoped open stream objects (via cleanup_task_files / release_file_handles).
+      2. Break exception references explicitly (`del e`).
+      3. Invoke `gc.collect()` to finalize underlying OS file descriptors before attempting file deletion or returning.
     """
     if not download_dir:
         settings = load_settings()
         download_dir = settings.get("download_dir")
     os.makedirs(download_dir, exist_ok=True)
 
+    # Verify cancellation state before transitioning to downloading to prevent
+    # thread startup race conditions from overwriting user cancellation.
     if task.cancel_requested or task.status == "cancelled":
         logger.info(f"Task {task.id} was cancelled before download began.")
         task.status = "cancelled"

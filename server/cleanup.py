@@ -52,8 +52,16 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
     """
     Scans for open Python file streams (io.IOBase) matching tracked task filepaths,
     closes them, and forces cyclic garbage collection.
-    This prevents Windows from locking files with [WinError 32] after cancellation
-    without disturbing other concurrent downloads in the same directory.
+
+    Windows File Lock / Exception Unwinding Rationale:
+    When aborting downloads via exceptions in callbacks/hooks (e.g. yt-dlp progress hooks),
+    third-party engines often skip cleanup routines like _finish_frag_download.
+    Unhandled exception tracebacks retain frame locals and closures in cyclic memory,
+    keeping underlying file handles (io.BufferedWriter / _io.FileIO) open and locking files
+    on Windows ([WinError 32]).
+    By scanning gc.get_objects() and matching only files associated with the target task,
+    we explicitly close orphaned streams and invoke gc.collect() to finalize OS descriptors
+    without disturbing active write streams of concurrent downloads in the same directory.
     """
     closed_count = 0
     targets = set()
@@ -87,7 +95,13 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
 
 def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0.1) -> bool:
     """
-    Attempts to remove a file, retrying briefly if temporarily locked by Windows filesystem.
+    Attempts to remove a file, retrying with bounded backoff if temporarily locked
+    by the Windows filesystem.
+
+    NTFS Latency Rationale:
+    On Windows NTFS, file handle release by the OS can experience brief latency after
+    Python stream close and garbage collection. Bounded retries (default 5 attempts with
+    100ms backoff) tolerate this delay before logging warnings or failing.
     """
     for attempt in range(max_retries):
         try:
@@ -108,7 +122,18 @@ def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0
 def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> list[str]:
     """
     Identifies and removes all incomplete, temporary, and fragment files for a cancelled task.
-    Handles *.part, *.ytdl, *.part-Frag*.part, format-specific intermediate files, and incomplete output files.
+
+    Comprehensive Cleanup Matrix:
+    Cancellation sweeps purge the following task-associated artifacts:
+      - Main output file (if incomplete or cancelled mid-stream)
+      - Partial files (*.part)
+      - yt-dlp resume state files (*.ytdl)
+      - Stream fragments (*-Frag*.part)
+      - Intermediate format streams matching strict .f<fmt>. boundaries
+        (e.g., .f(\\d+|ba|bv|...).part or format-specific extensions)
+      - Temporary outputs modified during the task's lifetime.
+    All sweeps are strictly scoped to the task's stems or tracked paths to prevent
+    colliding with legitimate user files or concurrent tasks.
     """
     if not download_dir:
         settings = load_settings()

@@ -120,6 +120,15 @@ class DownloadManager:
             return task.to_dict() if task else None
 
     def rematch_providers(self, settings: dict | None = None):
+        """
+        Re-evaluates and updates provider assignments (provider_id, provider_name,
+        and provider_limit) for all active and queued tasks in-memory.
+
+        Live Rematching Invariant:
+        Whenever provider definitions, URL patterns, or concurrency limits are updated in
+        settings, this method dynamically reconciles in-flight and pending tasks without
+        dropping task state, interrupting downloads, or requiring server restarts.
+        """
         if settings is None:
             settings = load_settings()
         with self._lock:

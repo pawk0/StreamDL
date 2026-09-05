@@ -48,4 +48,4 @@ def is_generic_title(title: str | None) -> bool:
         "video", "fetching info...", "undefined", "unknown", "null",
         "remote_control", "remote control", "download", "player"
     }
-    return t in generic_names or base in generic_names or t.startswith("index-f") or t.startswith("master-")
+    return t in generic_names or base in generic_names or t.startswith(("index-f", "master-"))
