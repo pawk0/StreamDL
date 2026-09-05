@@ -168,6 +168,15 @@ body {
   border: 1px solid rgba(99, 102, 241, 0.25);
 }
 
+.badge-provider {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--cyan);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  font-size: 9px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .stream-preview {
   background: var(--bg-base);
   border: 1px solid var(--border);

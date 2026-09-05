@@ -176,43 +176,70 @@
           <h3>Server Settings</h3>
           <button class="btn-close" id="btn-close-settings">&times;</button>
         </div>
-        <form id="form-settings" class="modal-body">
-          <div class="form-group">
-            <label for="setting-concurrency">
-              <span>Max Concurrent Downloads</span>
-              <span class="range-val-badge" id="val-concurrency">3</span>
-            </label>
-            <input type="range" id="setting-concurrency" min="1" max="10" step="1" value="3">
-            <small class="form-hint">Number of videos downloading simultaneously before queuing the rest.</small>
-          </div>
-
-          <div class="form-group">
-            <label for="setting-folder">Download Destination Folder</label>
-            <div class="input-with-action">
-              <input type="text" id="setting-folder" required>
-            </div>
-            <small class="form-hint">Absolute folder path on your PC where video files will be saved.</small>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label for="setting-quality">Default Quality</label>
-              <select id="setting-quality">
-                <option value="best">Best Quality</option>
-                <option value="1080p">1080p FHD</option>
-                <option value="720p">720p HD</option>
-                <option value="480p">480p SD</option>
-                <option value="audio">Audio Only (MP3)</option>
-              </select>
+        <form id="form-settings" class="modal-form">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="setting-concurrency">
+                <span>Overall Max Concurrent Downloads</span>
+                <span class="range-val-badge" id="val-concurrency">3</span>
+              </label>
+              <input type="range" id="setting-concurrency" min="1" max="10" step="1" value="3">
+              <small class="form-hint">Total number of videos downloading simultaneously across all providers before queuing.</small>
             </div>
 
-            <div class="form-group flex-1">
-              <label for="setting-format">Default Format</label>
-              <select id="setting-format">
-                <option value="mp4">MP4</option>
-                <option value="mkv">MKV</option>
-                <option value="mp3">MP3</option>
-              </select>
+            <div class="form-group">
+              <label for="setting-provider-concurrency">
+                <span>Default Max Concurrent per Provider</span>
+                <span class="range-val-badge" id="val-provider-concurrency">1</span>
+              </label>
+              <input type="range" id="setting-provider-concurrency" min="1" max="5" step="1" value="1">
+              <small class="form-hint">Fallback simultaneous limit for any individual provider/CDN to prevent rate-limiting.</small>
+            </div>
+
+            <div class="providers-section">
+              <div class="providers-section-header">
+                <div>
+                  <h4>Streaming Providers & Domain Patterns</h4>
+                  <small class="form-hint">Map rotating CDN domains (e.g. *cloudatacdn.com*, *r66nv9ed.com*) to providers.</small>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-add-provider">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  <span>Add Provider</span>
+                </button>
+              </div>
+              <div id="providers-list" class="providers-list">
+                <!-- Dynamically rendered provider cards -->
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="setting-folder">Download Destination Folder</label>
+              <div class="input-with-action">
+                <input type="text" id="setting-folder" required>
+              </div>
+              <small class="form-hint">Absolute folder path on your PC where video files will be saved.</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="setting-quality">Default Quality</label>
+                <select id="setting-quality">
+                  <option value="best">Best Quality</option>
+                  <option value="1080p">1080p FHD</option>
+                  <option value="720p">720p HD</option>
+                  <option value="480p">480p SD</option>
+                  <option value="audio">Audio Only (MP3)</option>
+                </select>
+              </div>
+
+              <div class="form-group flex-1">
+                <label for="setting-format">Default Format</label>
+                <select id="setting-format">
+                  <option value="mp4">MP4</option>
+                  <option value="mkv">MKV</option>
+                  <option value="mp3">MP3</option>
+                </select>
+              </div>
             </div>
           </div>
 

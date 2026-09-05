@@ -1,7 +1,19 @@
 {
   "download_dir": "C:\\Users\\Pawel\\Downloads\\VideoDL",
   "max_concurrent": 3,
+  "max_concurrent_per_provider": 1,
+  "providers": [
+    {
+      "id": "doodstream",
+      "name": "Doodstream",
+      "patterns": [
+        "*dood*",
+        "*cloudatacdn.com*"
+      ],
+      "max_concurrent": 1
+    }
+  ],
   "default_quality": "best",
-  "default_format": "mp4",
+  "default_format": "mkv",
   "port": 7921
 }

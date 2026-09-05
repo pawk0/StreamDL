@@ -313,7 +313,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Send download command to local Flask server
-async function sendDownloadRequest({ url, title, referer, quality = "best", format = "mp4" }) {
+async function sendDownloadRequest({ url, title, referer, provider, quality = "best", format = "mp4" }) {
   try {
     const headers = {};
     if (referer) {
@@ -328,7 +328,8 @@ async function sendDownloadRequest({ url, title, referer, quality = "best", form
         title,
         quality,
         format,
-        headers
+        headers,
+        provider
       })
     });
 

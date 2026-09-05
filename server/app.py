@@ -40,6 +40,7 @@ def get_status():
         "completed_count": completed,
         "total_tasks": len(tasks),
         "max_concurrent": settings.get("max_concurrent", 3),
+        "max_concurrent_per_provider": settings.get("max_concurrent_per_provider", 1),
         "download_dir": settings.get("download_dir"),
     })
 
@@ -57,6 +58,7 @@ def queue_download():
     quality = data.get("quality", "best")
     fmt = data.get("format", "mp4")
     headers = data.get("headers", {})
+    provider_name = data.get("provider")
 
     task = manager.add_task(
         url=url,
@@ -64,6 +66,7 @@ def queue_download():
         quality=quality,
         fmt=fmt,
         headers=headers,
+        provider_name=provider_name,
     )
 
     return jsonify({
@@ -85,6 +88,7 @@ def get_queue():
         "active_count": active_count,
         "queued_count": queued_count,
         "max_concurrent": settings.get("max_concurrent", 3),
+        "max_concurrent_per_provider": settings.get("max_concurrent_per_provider", 1),
         "download_dir": settings.get("download_dir"),
     })
 

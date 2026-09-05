@@ -11,7 +11,7 @@ import string
 from typing import Dict, List, Optional, Tuple
 import yt_dlp
 
-from server.config import load_settings
+from server.config import load_settings, match_provider
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -134,6 +134,9 @@ class DownloadTask:
         quality: str = "best",
         fmt: str = "mp4",
         headers: Optional[Dict[str, str]] = None,
+        provider_id: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        provider_limit: Optional[int] = None,
     ):
         self.id = task_id
         self.url = url
@@ -141,6 +144,13 @@ class DownloadTask:
         self.quality = quality
         self.format = fmt
         self.headers = headers or {}
+
+        # Resolve provider
+        referer = self.headers.get("Referer") or self.headers.get("referer")
+        pid, pname, plimit = match_provider(url, referer)
+        self.provider_id = provider_id or pid
+        self.provider_name = provider_name or pname
+        self.provider_limit = provider_limit or plimit
         
         self.status = "queued"  # queued, downloading, processing, completed, failed, cancelled
         self.progress = 0.0  # 0.0 to 100.0
@@ -167,6 +177,9 @@ class DownloadTask:
             "title": self.title,
             "quality": self.quality,
             "format": self.format,
+            "provider": self.provider_name,
+            "provider_id": self.provider_id,
+            "provider_limit": self.provider_limit,
             "status": self.status,
             "progress": self.progress,
             "speed": self.speed,
@@ -213,6 +226,9 @@ class DownloadManager:
         quality: str = "best",
         fmt: str = "mp4",
         headers: Optional[Dict[str, str]] = None,
+        provider_id: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        provider_limit: Optional[int] = None,
     ) -> DownloadTask:
         task_id = str(uuid.uuid4())[:8]
         task = DownloadTask(
@@ -222,11 +238,14 @@ class DownloadManager:
             quality=quality,
             fmt=fmt,
             headers=headers,
+            provider_id=provider_id,
+            provider_name=provider_name,
+            provider_limit=provider_limit,
         )
         with self._lock:
             self.tasks[task_id] = task
             self.task_order.append(task_id)
-        logger.info(f"Task {task_id} added to queue for {url}")
+        logger.info(f"Task {task_id} [{task.provider_name}] added to queue for {url}")
         return task
 
     def cancel_task(self, task_id: str) -> bool:
@@ -283,12 +302,34 @@ class DownloadManager:
                     del self._active_threads[tid]
 
                 active_count = len(self._active_threads)
-                slots_available = max_concurrent - active_count
+                if active_count >= max_concurrent:
+                    continue
 
+                # Calculate active count per provider
+                provider_counts: Dict[str, int] = {}
+                for tid in self._active_threads.keys():
+                    t = self.tasks.get(tid)
+                    if t:
+                        provider_counts[t.provider_id] = provider_counts.get(t.provider_id, 0) + 1
+
+                slots_available = max_concurrent - active_count
                 if slots_available > 0:
                     for tid in self.task_order:
                         task = self.tasks.get(tid)
                         if task and task.status == "queued" and not task.cancel_requested:
+                            p_active = provider_counts.get(task.provider_id, 0)
+                            # Dynamically resolve latest limit for this provider from settings
+                            provider_entry = next((p for p in (settings.get("providers") or []) if p.get("id") == task.provider_id), None)
+                            if provider_entry:
+                                p_limit = provider_entry.get("max_concurrent") or settings.get("max_concurrent_per_provider", 1)
+                            else:
+                                p_limit = settings.get("max_concurrent_per_provider", 1)
+                            task.provider_limit = p_limit
+
+                            # If this provider has hit its concurrency limit, skip this task for now
+                            if p_active >= p_limit:
+                                continue
+
                             # Start task in background thread
                             th = threading.Thread(
                                 target=self._execute_download,
@@ -297,6 +338,7 @@ class DownloadManager:
                             )
                             self._active_threads[tid] = th
                             th.start()
+                            provider_counts[task.provider_id] = p_active + 1
                             slots_available -= 1
                             if slots_available <= 0:
                                 break

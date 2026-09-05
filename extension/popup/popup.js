@@ -9,6 +9,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   
   const streamTypeBadge = document.getElementById("stream-type-badge");
   const streamFilename = document.getElementById("stream-filename");
+  const streamProviderBadge = document.getElementById("stream-provider-badge");
   const streamUrlText = document.getElementById("stream-url-text");
   const btnCopyUrl = document.getElementById("btn-copy-url");
   const groupOtherStreams = document.getElementById("group-other-streams");
@@ -27,6 +28,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   let activeTab = null;
   let detectedStreams = [];
   let currentStreamUrl = null;
+
+  function detectProvider(url, referer = "") {
+    const combined = (url + " " + referer).toLowerCase();
+    if (combined.includes("dood") || combined.includes("cloudatacdn.com")) {
+      return "Doodstream";
+    }
+    if (combined.includes("elliot") || combined.includes("sprintcdn") || combined.includes("r66nv9ed.com")) {
+      return "ElliotIntel";
+    }
+    try {
+      const u = new URL(url);
+      const parts = u.hostname.split(".");
+      return parts.length >= 2 ? parts.slice(-2).join(".") : u.hostname;
+    } catch (e) {
+      return "";
+    }
+  }
 
   // Banner display helper
   function showBanner(text, type = "success") {
@@ -61,9 +79,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const u = new URL(stream.url);
       const fn = extractFilename(stream.url);
-      const host = u.hostname;
+      const provider = detectProvider(stream.url, stream.referer);
       const prefix = stream.isMaster ? "⭐ [Master] " : "";
-      return `${prefix}${fn} (${host})`;
+      return `${prefix}${fn} (${provider || u.hostname})`;
     } catch (e) {
       return stream.url.substring(0, 45) + "...";
     }
@@ -139,6 +157,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentStreamUrl = stream.url;
       streamTypeBadge.textContent = stream.isMaster ? "⭐ Master Playlist" : stream.type;
       streamFilename.textContent = extractFilename(stream.url);
+      const provider = detectProvider(stream.url, stream.referer);
+      if (provider && streamProviderBadge) {
+        streamProviderBadge.textContent = provider;
+        streamProviderBadge.style.display = "inline-block";
+      } else if (streamProviderBadge) {
+        streamProviderBadge.style.display = "none";
+      }
       streamUrlText.textContent = stream.url;
       streamUrlText.title = stream.url;
     }
@@ -195,6 +220,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         url: currentStreamUrl,
         title: chosenTitle,
         referer: streamReferer,
+        provider: detectProvider(currentStreamUrl, streamReferer),
         quality: selectQuality.value,
         format: selectFormat.value,
       };
@@ -233,6 +259,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         url: activeTab.url,
         title: chosenTitle,
         referer: activeTab.url,
+        provider: detectProvider(activeTab.url, activeTab.url),
         quality: selectQuality.value,
         format: selectFormat.value,
       };
