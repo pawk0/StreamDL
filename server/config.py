@@ -6,7 +6,18 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
-SETTINGS_FILE = Path(__file__).parent.parent / "settings.json"
+def get_settings_file() -> Path:
+    env_override = os.environ.get("VIDEO_DL_SETTINGS_FILE")
+    if env_override:
+        return Path(env_override)
+    return Path(__file__).parent.parent / "settings.json"
+
+
+def __getattr__(name: str):
+    if name == "SETTINGS_FILE":
+        return get_settings_file()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads" / "VideoDL")
 
@@ -33,13 +44,22 @@ def load_settings() -> dict:
     settings = dict(DEFAULT_SETTINGS)
     # Deep copy default providers
     settings["providers"] = [dict(p) for p in DEFAULT_PROVIDERS]
-    if SETTINGS_FILE.exists():
+    
+    settings_file = get_settings_file()
+    if settings_file.exists():
         try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            with open(settings_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 settings.update(data)
         except Exception as e:
             print(f"Error loading settings: {e}")
+
+    # Environment port override
+    if "VIDEO_DL_PORT" in os.environ:
+        try:
+            settings["port"] = int(os.environ["VIDEO_DL_PORT"])
+        except (ValueError, TypeError):
+            pass
 
     # Ensure providers list exists and is well-formed
     if not settings.get("providers") or not isinstance(settings.get("providers"), list):
@@ -109,8 +129,9 @@ def save_settings(new_settings: dict) -> dict:
         if cleaned_providers:
             settings["providers"] = cleaned_providers
 
+    settings_file = get_settings_file()
     try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        with open(settings_file, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
     except Exception as e:
         print(f"Error saving settings: {e}")

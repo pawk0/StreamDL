@@ -153,9 +153,10 @@ def open_file(task_id: str):
     return jsonify({"success": False, "error": f"File does not exist: {fp}"}), 404
 
 
-def run_server():
+def run_server(port: int = None):
     settings = load_settings()
-    port = settings.get("port", 7921)
+    if port is None:
+        port = settings.get("port", 7921)
     print(f"=== Video Stream Downloader Server Running ===")
     print(f"Web UI: http://localhost:{port}")
     print(f"API endpoint: http://localhost:{port}/api/download")
