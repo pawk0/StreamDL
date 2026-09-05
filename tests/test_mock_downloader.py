@@ -3,13 +3,15 @@ import time
 from unittest.mock import MagicMock, patch
 import pytest
 
-from server.downloader import (
-    DownloadManager,
-    DownloadTask,
+from server.downloader import DownloadManager
+from server.task import DownloadTask
+from server.utils import (
     format_bytes,
     format_eta,
     sanitize_filename,
     is_generic_title,
+)
+from server.resolvers import (
     is_doodstream_url,
     resolve_doodstream,
 )
@@ -370,7 +372,7 @@ def test_mock_ytdlp_doodstream_resolution_integration(manager, monkeypatch):
     def mock_resolve(url, headers):
         return ("https://resolved-stream.dood/video.mp4", {"X-Resolved": "1"})
 
-    monkeypatch.setattr("server.downloader.resolve_doodstream", mock_resolve)
+    monkeypatch.setattr("server.engine.resolve_doodstream", mock_resolve)
 
     task = manager.add_task(url="https://dood.to/e/sampleembed")
     manager._execute_download(task)

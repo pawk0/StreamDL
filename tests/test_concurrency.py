@@ -1,7 +1,7 @@
 import time
 import pytest
 
-from server.downloader import DownloadTask
+from server.task import DownloadTask
 from server.config import save_settings
 
 

@@ -4,21 +4,10 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
-from server.cleanup import (
-    cleanup_task_files,
-    release_file_handles,
-    remove_file_with_retry,
-)
+from server.cleanup import cleanup_task_files
 from server.config import load_settings, match_provider
-from server.engine import build_ydl_options, execute_download
-from server.resolvers import is_doodstream_url, resolve_doodstream
+from server.engine import execute_download
 from server.task import DownloadTask
-from server.utils import (
-    format_bytes,
-    format_eta,
-    is_generic_title,
-    sanitize_filename,
-)
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -198,22 +187,5 @@ class DownloadManager:
                                 break
 
     def _execute_download(self, task: DownloadTask):
-        """Executes download delegating to engine, resolving Doodstream embeds if present."""
-        execute_download(task, doodstream_resolver=resolve_doodstream)
-
-
-__all__ = [
-    "DownloadManager",
-    "DownloadTask",
-    "format_bytes",
-    "format_eta",
-    "sanitize_filename",
-    "is_generic_title",
-    "is_doodstream_url",
-    "resolve_doodstream",
-    "release_file_handles",
-    "remove_file_with_retry",
-    "cleanup_task_files",
-    "build_ydl_options",
-    "execute_download",
-]
+        """Executes download delegating directly to the engine."""
+        execute_download(task)

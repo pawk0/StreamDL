@@ -1,8 +1,8 @@
 import os
 import time
 import pytest
-from server.downloader import (
-    DownloadTask,
+from server.task import DownloadTask
+from server.cleanup import (
     cleanup_task_files,
     release_file_handles,
     remove_file_with_retry,
