@@ -28,14 +28,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   let activeTab = null;
   let detectedStreams = [];
   let currentStreamUrl = null;
+  let configuredProviders = [];
+
+  // Load cached providers from storage if available
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(["cachedProviders"], (res) => {
+      if (res && Array.isArray(res.cachedProviders) && res.cachedProviders.length > 0) {
+        configuredProviders = res.cachedProviders;
+        if (detectedStreams.length > 0) {
+          setupStreamSelection(detectedStreams);
+        }
+      }
+    });
+  }
+
+  function matchPattern(pattern, text) {
+    let p = pattern.trim().toLowerCase();
+    if (!p) return false;
+    if (!p.includes("*")) {
+      p = `*${p}*`;
+    }
+    const regexStr = "^" + p.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$";
+    return new RegExp(regexStr, "i").test(text);
+  }
 
   function detectProvider(url, referer = "") {
-    const combined = (url + " " + referer).toLowerCase();
-    if (combined.includes("dood") || combined.includes("cloudatacdn.com")) {
-      return "Doodstream";
-    }
-    if (combined.includes("elliot") || combined.includes("sprintcdn") || combined.includes("r66nv9ed.com")) {
-      return "ElliotIntel";
+    const candidates = [url, referer].filter(Boolean);
+    for (const p of configuredProviders) {
+      const patterns = Array.isArray(p.patterns) ? p.patterns : [];
+      for (const pattern of patterns) {
+        for (const candidate of candidates) {
+          if (matchPattern(pattern, candidate)) {
+            return p.name || p.id;
+          }
+        }
+      }
     }
     try {
       const u = new URL(url);
@@ -87,7 +114,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Check Server Health
+  // Check Server Health & Load Settings
   async function checkServer() {
     try {
       const res = await fetch(`${SERVER_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
@@ -95,6 +122,23 @@ document.addEventListener("DOMContentLoaded", async () => {
         const data = await res.json();
         serverStatus.className = "server-status online";
         serverStatusText.textContent = `Online (${data.active_count} active)`;
+
+        try {
+          const sRes = await fetch(`${SERVER_URL}/api/settings`, { signal: AbortSignal.timeout(2000) });
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            if (sData?.settings?.providers && Array.isArray(sData.settings.providers)) {
+              configuredProviders = sData.settings.providers;
+              if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ cachedProviders: configuredProviders });
+              }
+              if (detectedStreams.length > 0) {
+                setupStreamSelection(detectedStreams);
+              }
+            }
+          }
+        } catch (_) {}
+
         return true;
       }
     } catch (e) {
