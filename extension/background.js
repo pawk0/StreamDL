@@ -15,17 +15,26 @@ function getStreamKey(url) {
 }
 
 // Helper to determine stream type, master vs variant status
-function analyzeStreamUrl(url) {
+function analyzeStreamUrl(url, typeHint = "", contentType = "") {
   const lower = url.toLowerCase();
   
-  // Exclude segment chunks
+  // Exclude segment chunks, transport streams, subtitles, images, styles
   if (
+    contentType.includes("mp2t") ||
     lower.includes(".ts") ||
     lower.includes(".m4s") ||
     lower.includes(".aac") ||
     lower.includes("segment-") ||
     lower.includes("/seg-") ||
-    lower.includes("/fragment")
+    lower.includes("/fragment") ||
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".png") ||
+    lower.endsWith(".gif") ||
+    lower.endsWith(".svg") ||
+    lower.endsWith(".vtt") ||
+    lower.endsWith(".srt") ||
+    lower.endsWith(".css") ||
+    lower.endsWith(".js")
   ) {
     return null;
   }
@@ -37,7 +46,15 @@ function analyzeStreamUrl(url) {
   const pathname = url.split("?")[0].toLowerCase();
   const filename = pathname.split("/").pop() || "";
 
-  if (lower.includes(".m3u8")) {
+  // Doodstream detection (dood.re, dood.video, doodstream, etc.)
+  if (
+    lower.includes("dood.video") ||
+    lower.includes("doodstream") ||
+    lower.includes("dood.")
+  ) {
+    type = "Doodstream Video";
+    isMaster = true;
+  } else if (lower.includes(".m3u8") || contentType.includes("mpegurl")) {
     type = "HLS (.m3u8)";
     
     // Check if this is a variant/child playlist (e.g. index-f2-v1-a1.m3u8, 720p.m3u8, chunklist)
@@ -61,13 +78,18 @@ function analyzeStreamUrl(url) {
     ) {
       isMaster = true;
     }
-  } else if (lower.includes(".mpd")) {
+  } else if (lower.includes(".mpd") || contentType.includes("dash")) {
     type = "DASH (.mpd)";
     isMaster = true;
-  } else if (lower.includes(".mp4")) {
+  } else if (lower.includes(".mp4") || contentType.includes("mp4")) {
     type = "MP4 Video";
-  } else if (lower.includes(".webm")) {
+    isMaster = true;
+  } else if (lower.includes(".webm") || contentType.includes("webm")) {
     type = "WebM Video";
+    isMaster = true;
+  } else if (typeHint === "media" || contentType.startsWith("video/")) {
+    type = "Direct Media Stream";
+    isMaster = true;
   } else {
     return null;
   }
@@ -75,70 +97,148 @@ function analyzeStreamUrl(url) {
   return { type, isMaster, isVariant, filename };
 }
 
-// Intercept network requests for media stream manifests and video URLs
+function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "") {
+  if (tabId < 0 || !url || !url.startsWith("http")) return;
+
+  const streamInfo = analyzeStreamUrl(url, typeHint, contentType);
+  if (!streamInfo) return;
+
+  let tabStreams = streamsByTab.get(tabId) || [];
+  const baseKey = getStreamKey(url);
+
+  // Check if we already have this exact URL
+  const exactIndex = tabStreams.findIndex((s) => s.url === url);
+  if (exactIndex !== -1) {
+    if (referer && !tabStreams[exactIndex].referer) {
+      tabStreams[exactIndex].referer = referer;
+    }
+    return;
+  }
+
+  // Check if we already have a stream from this exact video directory
+  const existingIndex = tabStreams.findIndex((s) => getStreamKey(s.url) === baseKey);
+
+  if (existingIndex !== -1) {
+    const existing = tabStreams[existingIndex];
+    if (streamInfo.isMaster && !existing.isMaster) {
+      tabStreams[existingIndex] = {
+        url: url,
+        type: streamInfo.type,
+        isMaster: true,
+        filename: streamInfo.filename,
+        referer: referer || existing.referer || "",
+        title: pageTitle || existing.title || "",
+        timestamp: Date.now(),
+      };
+    } else {
+      return;
+    }
+  } else {
+    const streamObj = {
+      url: url,
+      type: streamInfo.type,
+      isMaster: streamInfo.isMaster,
+      filename: streamInfo.filename,
+      referer: referer,
+      title: pageTitle,
+      timestamp: Date.now(),
+    };
+
+    if (streamInfo.isMaster) {
+      tabStreams.unshift(streamObj);
+    } else {
+      tabStreams.push(streamObj);
+    }
+  }
+
+  if (tabStreams.length > 20) {
+    tabStreams = tabStreams.slice(0, 20);
+  }
+
+  streamsByTab.set(tabId, tabStreams);
+  updateBadge(tabId, tabStreams.length);
+}
+
+// 1. Intercept all requests marked by Chrome as media type (catches Doodstream, HTML5 players, MSE)
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
+    registerStream(
+      details.tabId,
+      details.url,
+      details.type,
+      "",
+      details.initiator || details.documentUrl || ""
+    );
+  },
+  {
+    urls: ["<all_urls>"],
+    types: ["media"]
+  }
+);
 
-    const streamInfo = analyzeStreamUrl(details.url);
-    if (!streamInfo) return;
-
-    let tabStreams = streamsByTab.get(details.tabId) || [];
-    const baseKey = getStreamKey(details.url);
-
-    // Check if we already have a stream from this exact video directory
-    const existingIndex = tabStreams.findIndex((s) => getStreamKey(s.url) === baseKey);
-
-    if (existingIndex !== -1) {
-      const existing = tabStreams[existingIndex];
-      // If the incoming stream is a MASTER playlist and the existing is only a variant, upgrade it!
-      if (streamInfo.isMaster && !existing.isMaster) {
-        tabStreams[existingIndex] = {
-          url: details.url,
-          type: streamInfo.type,
-          isMaster: true,
-          filename: streamInfo.filename,
-          timestamp: Date.now(),
-          initiator: details.initiator || details.documentUrl || "",
-        };
-      } else {
-        // Already have the master or an identical stream from this video session, ignore duplicate variant
-        return;
-      }
-    } else {
-      // New stream from a distinct video/source
-      const streamObj = {
-        url: details.url,
-        type: streamInfo.type,
-        isMaster: streamInfo.isMaster,
-        filename: streamInfo.filename,
-        timestamp: Date.now(),
-        initiator: details.initiator || details.documentUrl || "",
-      };
-
-      if (streamInfo.isMaster) {
-        tabStreams.unshift(streamObj);
-      } else {
-        tabStreams.push(streamObj);
-      }
-    }
-
-    // Limit memory to 20 streams per tab
-    if (tabStreams.length > 20) {
-      tabStreams = tabStreams.slice(0, 20);
-    }
-
-    streamsByTab.set(details.tabId, tabStreams);
-    updateBadge(details.tabId, tabStreams.length);
+// 2. Intercept requests to known streaming patterns and Doodstream domains
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    registerStream(
+      details.tabId,
+      details.url,
+      details.type,
+      "",
+      details.initiator || details.documentUrl || ""
+    );
   },
   {
     urls: [
       "*://*/*.m3u8*",
       "*://*/*.mpd*",
       "*://*/*.mp4*",
-      "*://*/*.webm*"
-    ]
+      "*://*/*.webm*",
+      "*://*.doodstream.com/*",
+      "*://*.dood.video/*",
+      "*://*.dood.re/*",
+      "*://*.dood.to/*",
+      "*://*.dood.so/*",
+      "*://*.dood.cx/*",
+      "*://*.dood.la/*",
+      "*://*.dood.ws/*",
+      "*://*.dood.sh/*",
+      "*://*.dood.wf/*",
+      "*://*.dood.pm/*"
+    ],
+    types: ["xmlhttprequest", "other"]
   }
+);
+
+// 3. Intercept response headers to detect any video Content-Type (even extension-less URLs)
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    const headers = details.responseHeaders || [];
+    const ctHeader = headers.find((h) => h.name.toLowerCase() === "content-type");
+    const contentType = ctHeader ? ctHeader.value.toLowerCase() : "";
+
+    if (
+      contentType.startsWith("video/") ||
+      contentType.includes("application/vnd.apple.mpegurl") ||
+      contentType.includes("application/x-mpegurl") ||
+      contentType.includes("application/dash+xml")
+    ) {
+      registerStream(
+        details.tabId,
+        details.url,
+        details.type,
+        contentType,
+        details.initiator || details.documentUrl || ""
+      );
+    }
+  },
+  {
+    urls: ["<all_urls>"],
+    types: ["media", "xmlhttprequest", "other"]
+  },
+  ["responseHeaders"]
 );
 
 // Update badge count on extension icon
@@ -200,20 +300,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "REGISTER_DOM_MEDIA") {
     const tabId = sender.tab ? sender.tab.id : null;
     if (tabId) {
-      const streamInfo = analyzeStreamUrl(message.url);
-      if (streamInfo) {
-        let tabStreams = streamsByTab.get(tabId) || [];
-        if (!tabStreams.some((s) => s.url === message.url)) {
-          tabStreams.unshift({
-            url: message.url,
-            type: streamInfo.type,
-            isMaster: streamInfo.isMaster,
-            timestamp: Date.now()
-          });
-          streamsByTab.set(tabId, tabStreams);
-          updateBadge(tabId, tabStreams.length);
-        }
-      }
+      registerStream(
+        tabId,
+        message.url,
+        "media",
+        "",
+        message.referer || (sender.tab ? sender.tab.url : ""),
+        message.title || ""
+      );
     }
   }
 });

@@ -188,11 +188,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       const chosenTitle = (inputVideoTitle ? inputVideoTitle.value.trim() : "") || (activeTab ? activeTab.title : undefined);
+      const selectedStream = detectedStreams.find((s) => s.url === currentStreamUrl);
+      const streamReferer = selectedStream?.referer || (activeTab ? activeTab.url : undefined);
 
       const payload = {
         url: currentStreamUrl,
         title: chosenTitle,
-        referer: activeTab ? activeTab.url : undefined,
+        referer: streamReferer,
         quality: selectQuality.value,
         format: selectFormat.value,
       };

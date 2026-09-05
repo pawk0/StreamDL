@@ -4,13 +4,84 @@ import time
 import uuid
 import logging
 import threading
-from typing import Dict, List, Optional
+import urllib.request
+import urllib.parse
+import random
+import string
+from typing import Dict, List, Optional, Tuple
 import yt_dlp
 
 from server.config import load_settings
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+
+def is_doodstream_url(url: str) -> bool:
+    if not url:
+        return False
+    lower = url.lower()
+    return any(domain in lower for domain in [
+        "dood.re", "dood.to", "dood.so", "dood.ws", "dood.cx",
+        "dood.sh", "dood.la", "dood.watch", "doodstream.com", "dood.video", "dood.pm", "dood.wf"
+    ])
+
+
+def resolve_doodstream(url: str, custom_headers: dict = None) -> Optional[Tuple[str, dict]]:
+    """
+    Resolves a Doodstream page/embed URL (e.g. /e/xxx or /d/xxx) into the direct streaming media URL.
+    Returns (direct_stream_url, headers_dict) or None if failed.
+    """
+    try:
+        # Convert /d/ (download) to /e/ (embed)
+        embed_url = re.sub(r'/(d)/', '/e/', url)
+        domain = urllib.parse.urlparse(embed_url).netloc
+        base_domain = f"https://{domain}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": embed_url
+        }
+        if custom_headers:
+            headers.update(custom_headers)
+
+        req = urllib.request.Request(embed_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+
+        # Find pass_md5 path: /pass_md5/...
+        pass_match = re.search(r"(/pass_md5/[a-zA-Z0-9_\-]+)", html)
+        if not pass_match:
+            pass_match = re.search(r"\$\.get\('(/pass_md5/[^']+)'", html)
+        if not pass_match:
+            return None
+
+        pass_path = pass_match.group(1)
+        pass_url = f"{base_domain}{pass_path}"
+
+        # Fetch pass_url to get base stream URL prefix
+        pass_req = urllib.request.Request(pass_url, headers=headers)
+        with urllib.request.urlopen(pass_req, timeout=12) as resp:
+            stream_base = resp.read().decode('utf-8', errors='ignore').strip()
+
+        # Find token from JS
+        token_match = re.search(r"token=([a-zA-Z0-9]+)", html)
+        token = token_match.group(1) if token_match else "undefined"
+
+        # Generate random 10 characters as required by Doodstream player
+        rand_chars = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+        expiry = int(time.time() * 1000)
+
+        direct_url = f"{stream_base}{rand_chars}?token={token}&expiry={expiry}"
+        stream_headers = {
+            "User-Agent": headers["User-Agent"],
+            "Referer": base_domain + "/"
+        }
+        logger.info(f"Resolved Doodstream embed URL to direct stream: {direct_url[:50]}...")
+        return direct_url, stream_headers
+    except Exception as e:
+        logger.warning(f"Doodstream resolver exception for {url}: {e}")
+        return None
 
 
 def format_bytes(b: Optional[float]) -> str:
@@ -239,6 +310,16 @@ class DownloadManager:
         task.started_at = time.time()
         logger.info(f"Starting download for task {task.id}: {task.url}")
 
+        download_url = task.url
+        download_headers = dict(task.headers)
+
+        # Automatic Doodstream resolution if an embed/page link was passed
+        if is_doodstream_url(download_url) and "/pass_md5/" not in download_url and "?" not in download_url:
+            resolved = resolve_doodstream(download_url, download_headers)
+            if resolved:
+                download_url, extra_headers = resolved
+                download_headers.update(extra_headers)
+
         def progress_hook(d):
             if task.cancel_requested:
                 raise Exception("Download cancelled by user.")
@@ -348,14 +429,14 @@ class DownloadManager:
                 ydl_opts["merge_output_format"] = target_fmt
 
         # Pass custom HTTP headers (e.g. Referer, User-Agent) if provided
-        if task.headers:
-            ydl_opts["http_headers"] = task.headers
+        if download_headers:
+            ydl_opts["http_headers"] = download_headers
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # First extract info (without re-downloading if we can fetch title/thumbnail)
                 try:
-                    info = ydl.extract_info(task.url, download=False)
+                    info = ydl.extract_info(download_url, download=False)
                     if info:
                         extracted = info.get("title")
                         if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
@@ -368,7 +449,7 @@ class DownloadManager:
                     raise Exception("Download cancelled by user.")
 
                 # Perform actual download
-                info = ydl.extract_info(task.url, download=True)
+                info = ydl.extract_info(download_url, download=True)
                 if info:
                     extracted = info.get("title")
                     if extracted and not is_generic_title(extracted) and is_generic_title(task.title):

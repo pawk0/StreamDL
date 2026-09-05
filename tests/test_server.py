@@ -127,6 +127,13 @@ class TestServerAPI(unittest.TestCase):
         self.assertTrue(is_generic_title("manifest"))
         self.assertFalse(is_generic_title("Eliota Intelligence Analysis"))
 
+    def test_doodstream_url_detection(self):
+        from server.downloader import is_doodstream_url
+        self.assertTrue(is_doodstream_url("https://dood.re/e/xyz123"))
+        self.assertTrue(is_doodstream_url("https://doodstream.com/d/abc456"))
+        self.assertTrue(is_doodstream_url("https://dood.to/e/789"))
+        self.assertFalse(is_doodstream_url("https://youtube.com/watch?v=123"))
+
 
 if __name__ == "__main__":
     unittest.main()
