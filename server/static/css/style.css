@@ -551,30 +551,47 @@ select option {
   font-weight: 600;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .btn-map-provider {
-  background: rgba(99, 102, 241, 0.18);
-  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.22);
+  border: 1px solid rgba(99, 102, 241, 0.45);
   color: #c7d2fe;
   border-radius: var(--radius-full);
-  font-size: 0.72rem;
+  width: 17px;
+  height: 17px;
+  min-width: 17px;
+  min-height: 17px;
+  font-size: 0.82rem;
   font-weight: 700;
-  padding: 2px 8px;
+  line-height: 1;
+  padding: 0;
+  margin-left: 2px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-decoration: none;
+  outline: none;
 }
 
 .btn-map-provider:hover {
-  background: rgba(99, 102, 241, 0.35);
-  border-color: var(--color-primary);
+  background: var(--color-primary);
+  border-color: #818cf8;
   color: #ffffff;
-  transform: translateY(-1px);
+  transform: scale(1.15);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+
+.btn-map-provider:active {
+  transform: scale(0.95);
+}
+
+.btn-map-provider:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 /* Progress Bar */

@@ -230,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isDirect = !task.provider_id || task.provider_id.toLowerCase() === 'direct';
       const showMapBtn = !isConfigured && !isDirect;
       const mapBtnHtml = showMapBtn
-        ? `<button type="button" class="btn-map-provider" data-domain="${escapeHtml(task.provider_id || task.provider)}" title="Map ${escapeHtml(task.provider_id || task.provider)} to a provider">+ Map</button>`
+        ? `<button type="button" class="btn-map-provider" data-domain="${escapeHtml(task.provider_id || task.provider)}" title="Map ${escapeHtml(task.provider_id || task.provider)} to a provider" aria-label="Map ${escapeHtml(task.provider_id || task.provider)} to a provider">+</button>`
         : '';
 
       card.innerHTML = `
@@ -243,8 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
           <div class="task-badges">
-            <span class="badge badge-provider" title="Streaming Provider / Host">🌐 ${escapeHtml(task.provider || 'Direct')}</span>
-            ${mapBtnHtml}
+            <span class="badge badge-provider" title="Streaming Provider / Host"><span>🌐 ${escapeHtml(task.provider || 'Direct')}</span>${mapBtnHtml}</span>
             <span class="badge badge-quality">${task.quality.toUpperCase()} • ${task.format.toUpperCase()}</span>
             <span class="badge ${statusBadgeClass}">${statusLabel}</span>
           </div>

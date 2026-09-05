@@ -44,6 +44,7 @@ A modern, robust personal media archiving solution that captures video streams d
 - **Modern Web Dashboard**: Real-time progress tracking, live download speed, ETA, progress bars, cancellation, download history, and settings at `http://localhost:7921`.
 - **Referer & Header Passing**: Automatically passes `Referer` and `User-Agent` headers from the browser to prevent HTTP 403 Forbidden errors from CDN token checkers.
 - **Quality & Format Controls**: Download in Best Available, 1080p FHD, 720p HD, 480p SD, or extract pure audio as MP3.
+- **Streaming Provider Mapping**: Map rotating CDN domains to custom provider concurrency limits directly from the dashboard via the quick `+` button next to detected domains.
 - **1-Click Folder & File Access**: Direct buttons to open the download folder in Windows File Explorer or play the completed media file.
 
 ---
@@ -119,6 +120,7 @@ Works with Google Chrome, Microsoft Edge, Brave, Opera, and any Chromium-based b
 
 Click the **Settings** gear icon in the Web UI (`http://localhost:7921`) to customize:
 - **Max Concurrent Downloads**: Slider from 1 to 10 (changes take effect immediately for queued items).
+- **Streaming Providers & Domain Patterns**: Add custom providers, wildcard CDN patterns, and per-provider concurrency limits, or map unconfigured domains directly using the `+` button next to the domain.
 - **Download Destination Folder**: Custom path on your computer (defaults to `~/Downloads/VideoDL`).
 - **Default Quality & Format**: Preferred preset for new downloads.
 
