@@ -89,6 +89,7 @@ def get_queue():
         "queued_count": queued_count,
         "max_concurrent": settings.get("max_concurrent", 3),
         "max_concurrent_per_provider": settings.get("max_concurrent_per_provider", 1),
+        "providers": settings.get("providers", []),
         "download_dir": settings.get("download_dir"),
     })
 
@@ -112,6 +113,7 @@ def manage_settings():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
         updated = save_settings(data)
+        manager.rematch_providers(updated)
         return jsonify({"success": True, "settings": updated})
     return jsonify({"success": True, "settings": load_settings()})
 

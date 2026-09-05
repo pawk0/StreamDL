@@ -289,6 +289,18 @@ class DownloadManager:
             task = self.tasks.get(task_id)
             return task.to_dict() if task else None
 
+    def rematch_providers(self, settings: Optional[dict] = None):
+        if settings is None:
+            settings = load_settings()
+        with self._lock:
+            for task in self.tasks.values():
+                referer = task.headers.get("Referer") or task.headers.get("referer")
+                pid, pname, plimit = match_provider(task.url, referer, settings)
+                task.provider_id = pid
+                task.provider_name = pname
+                task.provider_limit = plimit
+        logger.info("Rematched tasks against updated provider configuration.")
+
     def _dispatcher_loop(self):
         while not self._stop_dispatcher:
             time.sleep(0.5)

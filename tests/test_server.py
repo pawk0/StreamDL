@@ -16,7 +16,13 @@ class TestServerAPI(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         self.manager = DownloadManager.get_instance()
+        self._orig_settings = load_settings()
         # Reset tasks
+        self.manager.tasks.clear()
+        self.manager.task_order.clear()
+
+    def tearDown(self):
+        save_settings(self._orig_settings)
         self.manager.tasks.clear()
         self.manager.task_order.clear()
 
@@ -133,6 +139,38 @@ class TestServerAPI(unittest.TestCase):
         self.assertTrue(is_doodstream_url("https://doodstream.com/d/abc456"))
         self.assertTrue(is_doodstream_url("https://dood.to/e/789"))
         self.assertFalse(is_doodstream_url("https://youtube.com/watch?v=123"))
+
+    def test_queue_endpoint_returns_providers_and_rematches(self):
+        task = self.manager.add_task(url="https://edge1.r66nv9ed.com/video.m3u8")
+        self.assertEqual(task.provider_id, "r66nv9ed.com")
+
+        res = self.client.get("/api/queue")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("providers", data)
+        self.assertEqual(len(data["tasks"]), 1)
+        self.assertEqual(data["tasks"][0]["provider_id"], "r66nv9ed.com")
+
+        current_settings = load_settings()
+        if "providers" not in current_settings:
+            current_settings["providers"] = []
+        current_settings["providers"].append({
+            "id": "elliotintel",
+            "name": "ElliotIntel",
+            "patterns": ["*r66nv9ed.com*"],
+            "max_concurrent": 2
+        })
+        res_post = self.client.post(
+            "/api/settings",
+            data=json.dumps(current_settings),
+            content_type="application/json"
+        )
+        self.assertEqual(res_post.status_code, 200)
+
+        updated = self.manager.get_task(task.id)
+        self.assertEqual(updated["provider_id"], "elliotintel")
+        self.assertEqual(updated["provider"], "ElliotIntel")
+        self.assertEqual(updated["provider_limit"], 2)
 
 
 if __name__ == "__main__":

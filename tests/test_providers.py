@@ -106,6 +106,27 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(data["provider_id"], "doodstream")
         self.assertEqual(data["provider_limit"], 1)
 
+    def test_rematch_providers_live_update(self):
+        manager = DownloadManager.get_instance()
+        task = manager.add_task(
+            url="https://edge99.novelcdn.net/stream.m3u8",
+            title="Novel Stream"
+        )
+        self.assertEqual(task.provider_id, "novelcdn.net")
+        self.assertEqual(task.provider_name, "novelcdn.net")
+
+        # Now map novelcdn.net into Doodstream
+        settings = load_settings()
+        dood = next(p for p in settings["providers"] if p["id"] == "doodstream")
+        dood["patterns"].append("*novelcdn.net*")
+        save_settings(settings)
+
+        # Rematch tasks
+        manager.rematch_providers()
+
+        self.assertEqual(task.provider_id, "doodstream")
+        self.assertEqual(task.provider_name, "Doodstream")
+
 
 if __name__ == "__main__":
     unittest.main()
