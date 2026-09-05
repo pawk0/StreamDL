@@ -14,7 +14,12 @@ from server.resolvers import is_doodstream_url, resolve_doodstream
 from server.task import DownloadTask
 from server.utils import format_bytes, format_eta, is_generic_title, sanitize_filename
 
+from server.patches import apply_ytdlp_patches, patch_ytdlp_extension_handling
+
 logger = logging.getLogger("video_dl.engine")
+
+# Apply yt-dlp compatibility patches immediately on module load
+apply_ytdlp_patches()
 
 DEFAULT_HTTP_HEADERS: Dict[str, str] = {
     "User-Agent": (

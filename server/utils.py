@@ -43,7 +43,10 @@ def is_generic_title(title: Optional[str]) -> bool:
     t = title.strip().lower()
     if not t:
         return True
-    return t in [
+    base = t.rsplit(".", 1)[0] if "." in t else t
+    generic_names = {
         "master", "index", "manifest", "playlist", "stream",
-        "video", "fetching info...", "undefined", "unknown", "null"
-    ] or t.startswith("index-f") or t.startswith("master-")
+        "video", "fetching info...", "undefined", "unknown", "null",
+        "remote_control", "remote control", "download", "player"
+    }
+    return t in generic_names or base in generic_names or t.startswith("index-f") or t.startswith("master-")

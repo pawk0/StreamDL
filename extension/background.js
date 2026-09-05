@@ -54,6 +54,9 @@ function analyzeStreamUrl(url, typeHint = "", contentType = "") {
   ) {
     type = "Doodstream Video";
     isMaster = true;
+  } else if (lower.includes("remote_control.php")) {
+    type = "Direct MP4 Stream";
+    isMaster = true;
   } else if (lower.includes(".m3u8") || contentType.includes("mpegurl")) {
     type = "HLS (.m3u8)";
     
@@ -219,6 +222,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       "*://*/*.mpd*",
       "*://*/*.mp4*",
       "*://*/*.webm*",
+      "*://*/remote_control.php*",
       "*://*.doodstream.com/*",
       "*://*.dood.video/*",
       "*://*.dood.re/*",
