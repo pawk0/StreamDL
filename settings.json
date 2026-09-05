@@ -10,7 +10,7 @@
         "*dood*",
         "*cloudatacdn.com*"
       ],
-      "max_concurrent": 1
+      "max_concurrent": 2
     },
     {
       "id": "eliotaintelligence",
@@ -18,7 +18,7 @@
       "patterns": [
         "*eliotaintelligence.org*"
       ],
-      "max_concurrent": 1
+      "max_concurrent": 2
     },
     {
       "id": "voesx",
@@ -26,7 +26,7 @@
       "patterns": [
         "*cloudwindow-route.com*"
       ],
-      "max_concurrent": 1
+      "max_concurrent": 2
     },
     {
       "id": "byse",
@@ -34,7 +34,7 @@
       "patterns": [
         "*r66nv9ed.com*"
       ],
-      "max_concurrent": 1
+      "max_concurrent": 2
     },
     {
       "id": "lulustream",
@@ -47,6 +47,14 @@
         "*lulu.st*"
       ],
       "max_concurrent": 1
+    },
+    {
+      "id": "s1q2105",
+      "name": "S1q2105",
+      "patterns": [
+        "*s1q2105.com*"
+      ],
+      "max_concurrent": 2
     }
   ],
   "default_quality": "best",
