@@ -1,9 +1,10 @@
 import json
+
 import pytest
 
 from server.config import load_settings, save_settings
-from server.utils import sanitize_filename, is_generic_title
 from server.resolvers import is_doodstream_url
+from server.utils import is_generic_title, sanitize_filename
 
 
 def test_status_endpoint(client):

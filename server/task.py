@@ -1,5 +1,4 @@
 import time
-from typing import Dict, Optional, Set
 
 from server.config import match_provider
 from server.utils import format_bytes
@@ -12,13 +11,13 @@ class DownloadTask:
         self,
         task_id: str,
         url: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         quality: str = "best",
         fmt: str = "mp4",
-        headers: Optional[Dict[str, str]] = None,
-        provider_id: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        provider_limit: Optional[int] = None,
+        headers: dict[str, str] | None = None,
+        provider_id: str | None = None,
+        provider_name: str | None = None,
+        provider_limit: int | None = None,
     ):
         self.id = task_id
         self.url = url
@@ -41,16 +40,16 @@ class DownloadTask:
         self.downloaded_bytes = 0
         self.total_bytes = 0
         self.eta = "--:--"
-        self.error_message: Optional[str] = None
-        self.filepath: Optional[str] = None
-        self.filename: Optional[str] = None
-        self.thumbnail: Optional[str] = None
+        self.error_message: str | None = None
+        self.filepath: str | None = None
+        self.filename: str | None = None
+        self.thumbnail: str | None = None
 
         self.created_at = time.time()
-        self.started_at: Optional[float] = None
-        self.completed_at: Optional[float] = None
+        self.started_at: float | None = None
+        self.completed_at: float | None = None
         self.cancel_requested = False
-        self.tracked_files: Set[str] = set()
+        self.tracked_files: set[str] = set()
 
     def to_dict(self) -> dict:
         return {

@@ -1,6 +1,7 @@
 import os
 import subprocess
-from flask import Flask, request, jsonify, render_template, send_from_directory
+
+from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
 from server.config import load_settings, save_settings
@@ -159,7 +160,7 @@ def run_server(port: int = None):
     settings = load_settings()
     if port is None:
         port = settings.get("port", 7921)
-    print(f"=== Video Stream Downloader Server Running ===")
+    print("=== Video Stream Downloader Server Running ===")
     print(f"Web UI: http://localhost:{port}")
     print(f"API endpoint: http://localhost:{port}/api/download")
     print(f"Downloads saved to: {settings.get('download_dir')}")

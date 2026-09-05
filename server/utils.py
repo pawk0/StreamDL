@@ -1,8 +1,7 @@
 import re
-from typing import Optional
 
 
-def format_bytes(b: Optional[float]) -> str:
+def format_bytes(b: float | None) -> str:
     """Formats a byte value into human-readable representation (B, KB, MB, GB, TB, PB)."""
     if not b or b <= 0:
         return "0 B"
@@ -13,7 +12,7 @@ def format_bytes(b: Optional[float]) -> str:
     return f"{b:.1f} PB"
 
 
-def format_eta(seconds: Optional[int]) -> str:
+def format_eta(seconds: int | None) -> str:
     """Formats remaining seconds into mm:ss or hh:mm:ss format."""
     if seconds is None or seconds < 0:
         return "--:--"
@@ -36,7 +35,7 @@ def sanitize_filename(title: str, max_length: int = 150) -> str:
     return cleaned[:max_length].strip('. ')
 
 
-def is_generic_title(title: Optional[str]) -> bool:
+def is_generic_title(title: str | None) -> bool:
     """Checks whether the given title is generic or an uninformative placeholder."""
     if not title:
         return True

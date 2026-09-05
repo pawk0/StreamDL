@@ -5,7 +5,6 @@ import string
 import time
 import urllib.parse
 import urllib.request
-from typing import Optional, Tuple
 
 logger = logging.getLogger("video_dl.resolvers")
 
@@ -21,7 +20,7 @@ def is_doodstream_url(url: str) -> bool:
     ])
 
 
-def resolve_doodstream(url: str, custom_headers: dict = None) -> Optional[Tuple[str, dict]]:
+def resolve_doodstream(url: str, custom_headers: dict = None) -> tuple[str, dict] | None:
     """
     Resolves a Doodstream page/embed URL (e.g. /e/xxx or /d/xxx) into the direct streaming media URL.
     Returns (direct_stream_url, headers_dict) or None if failed.

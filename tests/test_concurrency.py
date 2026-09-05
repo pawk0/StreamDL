@@ -1,8 +1,7 @@
 import time
-import pytest
 
-from server.task import DownloadTask
 from server.config import save_settings
+from server.task import DownloadTask
 
 
 def test_queue_and_concurrency_limit(manager, monkeypatch):

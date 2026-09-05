@@ -4,24 +4,24 @@ import os
 import re
 import time
 import urllib.parse
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 import yt_dlp
 
 from server.cleanup import cleanup_task_files
 from server.config import load_settings
+from server.patches import apply_ytdlp_patches
 from server.resolvers import is_doodstream_url, resolve_doodstream
 from server.task import DownloadTask
 from server.utils import format_bytes, format_eta, is_generic_title, sanitize_filename
-
-from server.patches import apply_ytdlp_patches, patch_ytdlp_extension_handling
 
 logger = logging.getLogger("video_dl.engine")
 
 # Apply yt-dlp compatibility patches immediately on module load
 apply_ytdlp_patches()
 
-DEFAULT_HTTP_HEADERS: Dict[str, str] = {
+DEFAULT_HTTP_HEADERS: dict[str, str] = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -37,9 +37,9 @@ DEFAULT_HTTP_HEADERS: Dict[str, str] = {
 def build_ydl_options(
     task: DownloadTask,
     download_dir: str,
-    progress_hook: Callable[[Dict[str, Any]], None],
-    postprocessor_hook: Callable[[Dict[str, Any]], None],
-    custom_headers: Optional[Dict[str, str]] = None,
+    progress_hook: Callable[[dict[str, Any]], None],
+    postprocessor_hook: Callable[[dict[str, Any]], None],
+    custom_headers: dict[str, str] | None = None,
 ) -> dict:
     """Builds yt-dlp configuration options based on task quality and target format."""
     clean_base = None
@@ -51,7 +51,7 @@ def build_ydl_options(
     else:
         out_template = os.path.join(download_dir, "%(title).150s.%(ext)s")
 
-    ydl_opts: Dict[str, Any] = {
+    ydl_opts: dict[str, Any] = {
         "outtmpl": out_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
@@ -127,8 +127,8 @@ def build_ydl_options(
 
 def execute_download(
     task: DownloadTask,
-    download_dir: Optional[str] = None,
-    doodstream_resolver: Optional[Callable[..., Optional[tuple]]] = None,
+    download_dir: str | None = None,
+    doodstream_resolver: Callable[..., tuple | None] | None = None,
 ):
     """
     Executes a single DownloadTask using yt-dlp, handling progress tracking,

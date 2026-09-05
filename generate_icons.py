@@ -1,7 +1,8 @@
+import math
 import os
 import struct
 import zlib
-import math
+
 
 def create_png(width, height, pixels):
     """Creates a raw RGBA PNG from a list of (R, G, B, A) pixels."""

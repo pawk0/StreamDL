@@ -1,4 +1,5 @@
 import sys
+
 from server.app import run_server
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import time
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 from server.config import load_settings
 from server.task import DownloadTask
@@ -48,7 +48,7 @@ def _is_task_file(candidate_abs: str, targets: set) -> bool:
     return False
 
 
-def release_file_handles(download_dir: str, task_filepaths: Optional[Iterable[str]] = None) -> int:
+def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None = None) -> int:
     """
     Scans for open Python file streams (io.IOBase) matching tracked task filepaths,
     closes them, and forces cyclic garbage collection.
@@ -105,7 +105,7 @@ def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0
     return True
 
 
-def cleanup_task_files(task: DownloadTask, download_dir: Optional[str] = None) -> List[str]:
+def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> list[str]:
     """
     Identifies and removes all incomplete, temporary, and fragment files for a cancelled task.
     Handles *.part, *.ytdl, *.part-Frag*.part, format-specific intermediate files, and incomplete output files.

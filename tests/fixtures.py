@@ -1,11 +1,10 @@
 import json
-import os
-from pathlib import Path
+
 import pytest
 
 from server.app import app
+from server.config import DEFAULT_PROVIDERS, DEFAULT_SETTINGS
 from server.downloader import DownloadManager
-from server.config import DEFAULT_SETTINGS, DEFAULT_PROVIDERS
 
 
 @pytest.fixture(autouse=True)

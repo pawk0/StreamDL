@@ -1,7 +1,6 @@
 import logging
 import sys
 import urllib.parse
-from typing import Optional
 
 import yt_dlp
 import yt_dlp.utils
@@ -37,7 +36,7 @@ def apply_ytdlp_patches() -> None:
         frozenset()
     )
 
-    def smart_determine_ext(url: Optional[str], default_ext: Optional[str] = "unknown_video") -> Optional[str]:
+    def smart_determine_ext(url: str | None, default_ext: str | None = "unknown_video") -> str | None:
         if not url:
             return default_ext
 

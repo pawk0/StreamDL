@@ -1,7 +1,6 @@
 import pytest
 
-from server.config import match_provider, load_settings, save_settings
-from server.downloader import DownloadManager
+from server.config import load_settings, match_provider, save_settings
 
 
 @pytest.fixture(autouse=True)

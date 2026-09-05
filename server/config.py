@@ -1,10 +1,10 @@
+import fnmatch
 import json
 import os
 import re
-import fnmatch
 import urllib.parse
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+
 
 def get_settings_file() -> Path:
     env_override = os.environ.get("VIDEO_DL_SETTINGS_FILE")
@@ -21,7 +21,7 @@ def __getattr__(name: str):
 
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads" / "VideoDL")
 
-DEFAULT_PROVIDERS: List[Dict] = [
+DEFAULT_PROVIDERS: list[dict] = [
     {
         "id": "doodstream",
         "name": "Doodstream",
@@ -145,7 +145,7 @@ def save_settings(new_settings: dict) -> dict:
     return settings
 
 
-def match_provider(url: str, referer: Optional[str] = None, settings: Optional[dict] = None) -> Tuple[str, str, int]:
+def match_provider(url: str, referer: str | None = None, settings: dict | None = None) -> tuple[str, str, int]:
     """
     Matches a URL and referer against configured providers.
     Returns (provider_id, provider_name, provider_concurrency_limit).

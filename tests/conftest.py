@@ -1,3 +1,3 @@
-from tests.fixtures import isolated_env, client, manager
+from tests.fixtures import client, isolated_env, manager
 
-__all__ = ["isolated_env", "client", "manager"]
+__all__ = ["client", "isolated_env", "manager"]

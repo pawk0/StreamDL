@@ -2,7 +2,6 @@ import logging
 import threading
 import time
 import uuid
-from typing import Dict, List, Optional
 
 from server.cleanup import cleanup_task_files
 from server.config import load_settings, match_provider
@@ -22,9 +21,9 @@ class DownloadManager:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self.tasks: Dict[str, DownloadTask] = {}
-        self.task_order: List[str] = []
-        self._active_threads: Dict[str, threading.Thread] = {}
+        self.tasks: dict[str, DownloadTask] = {}
+        self.task_order: list[str] = []
+        self._active_threads: dict[str, threading.Thread] = {}
         self._stop_dispatcher = False
 
         # Start background queue dispatcher
@@ -40,13 +39,13 @@ class DownloadManager:
     def add_task(
         self,
         url: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         quality: str = "best",
         fmt: str = "mp4",
-        headers: Optional[Dict[str, str]] = None,
-        provider_id: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        provider_limit: Optional[int] = None,
+        headers: dict[str, str] | None = None,
+        provider_id: str | None = None,
+        provider_name: str | None = None,
+        provider_limit: int | None = None,
     ) -> DownloadTask:
         task_id = str(uuid.uuid4())[:8]
         task = DownloadTask(
@@ -111,16 +110,16 @@ class DownloadManager:
                     self.task_order.remove(tid)
         logger.info(f"Cleared {len(to_remove)} finished tasks.")
 
-    def get_all_tasks(self) -> List[dict]:
+    def get_all_tasks(self) -> list[dict]:
         with self._lock:
             return [self.tasks[tid].to_dict() for tid in self.task_order if tid in self.tasks]
 
-    def get_task(self, task_id: str) -> Optional[dict]:
+    def get_task(self, task_id: str) -> dict | None:
         with self._lock:
             task = self.tasks.get(task_id)
             return task.to_dict() if task else None
 
-    def rematch_providers(self, settings: Optional[dict] = None):
+    def rematch_providers(self, settings: dict | None = None):
         if settings is None:
             settings = load_settings()
         with self._lock:
@@ -149,7 +148,7 @@ class DownloadManager:
                     continue
 
                 # Calculate active count per provider
-                provider_counts: Dict[str, int] = {}
+                provider_counts: dict[str, int] = {}
                 for tid in self._active_threads.keys():
                     t = self.tasks.get(tid)
                     if t:

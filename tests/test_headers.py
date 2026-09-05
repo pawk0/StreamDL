@@ -1,6 +1,5 @@
-import pytest
-from server.config import match_provider, load_settings
-from server.engine import build_ydl_options, DEFAULT_HTTP_HEADERS
+from server.config import match_provider
+from server.engine import build_ydl_options
 from server.task import DownloadTask
 
 

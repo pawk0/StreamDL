@@ -1,13 +1,15 @@
 import os
 import time
+
 import pytest
-from server.task import DownloadTask
+
 from server.cleanup import (
     cleanup_task_files,
     release_file_handles,
     remove_file_with_retry,
 )
 from server.config import save_settings
+from server.task import DownloadTask
 from tests.test_mock_downloader import MockYoutubeDL
 
 

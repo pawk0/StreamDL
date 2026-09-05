@@ -1,9 +1,9 @@
 import http.server
 import os
 import threading
+
 import yt_dlp
 import yt_dlp.utils
-import pytest
 
 from server.engine import execute_download
 from server.patches import apply_ytdlp_patches

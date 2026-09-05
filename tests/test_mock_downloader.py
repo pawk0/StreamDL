@@ -1,19 +1,17 @@
 import os
-import time
-from unittest.mock import MagicMock, patch
+
 import pytest
 
-from server.downloader import DownloadManager
+from server.resolvers import (
+    is_doodstream_url,
+    resolve_doodstream,
+)
 from server.task import DownloadTask
 from server.utils import (
     format_bytes,
     format_eta,
-    sanitize_filename,
     is_generic_title,
-)
-from server.resolvers import (
-    is_doodstream_url,
-    resolve_doodstream,
+    sanitize_filename,
 )
 
 
