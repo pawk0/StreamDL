@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const groupOtherStreams = document.getElementById("group-other-streams");
   const selectStreamChoice = document.getElementById("select-stream-choice");
   
+  const inputVideoTitle = document.getElementById("input-video-title");
   const selectQuality = document.getElementById("select-quality");
   const selectFormat = document.getElementById("select-format");
   const btnDownloadStream = document.getElementById("btn-download-stream");
@@ -94,6 +95,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     pageTitle.title = activeTab.title || "";
     pageUrl.textContent = activeTab.url || "";
     pageUrl.title = activeTab.url || "";
+
+    if (activeTab.title && inputVideoTitle) {
+      let cleanTitle = activeTab.title.trim();
+      // Remove trailing site suffixes like " - SiteName", " | SiteName"
+      cleanTitle = cleanTitle.replace(/\s*[-–—|]\s*([^|–—-]+)$/i, (match, suffix) => {
+        if (suffix.includes(".") || suffix.length < 25) return "";
+        return match;
+      }).trim();
+      inputVideoTitle.value = cleanTitle || activeTab.title;
+    }
   }
 
   await checkServer();
@@ -176,9 +187,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
+      const chosenTitle = (inputVideoTitle ? inputVideoTitle.value.trim() : "") || (activeTab ? activeTab.title : undefined);
+
       const payload = {
         url: currentStreamUrl,
-        title: activeTab ? activeTab.title : undefined,
+        title: chosenTitle,
         referer: activeTab ? activeTab.url : undefined,
         quality: selectQuality.value,
         format: selectFormat.value,
@@ -212,9 +225,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
+      const chosenTitle = (inputVideoTitle ? inputVideoTitle.value.trim() : "") || (activeTab ? activeTab.title : undefined);
+
       const payload = {
         url: activeTab.url,
-        title: activeTab.title,
+        title: chosenTitle,
         referer: activeTab.url,
         quality: selectQuality.value,
         format: selectFormat.value,

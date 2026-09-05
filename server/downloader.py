@@ -33,6 +33,27 @@ def format_eta(seconds: Optional[int]) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+def sanitize_filename(title: str, max_length: int = 150) -> str:
+    if not title:
+        return "video"
+    # Remove Windows illegal characters: < > : " / \ | ? *
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', title)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip('. ')
+    if not cleaned:
+        return "video"
+    return cleaned[:max_length].strip('. ')
+
+
+def is_generic_title(title: Optional[str]) -> bool:
+    if not title:
+        return True
+    t = title.strip().lower()
+    return t in [
+        "master", "index", "manifest", "playlist", "stream",
+        "video", "fetching info...", "undefined", "unknown", "null"
+    ] or t.startswith("index-f") or t.startswith("master-")
+
+
 class DownloadTask:
     def __init__(
         self,
@@ -276,8 +297,18 @@ class DownloadManager:
                     task.filepath = os.path.abspath(fn)
                     task.filename = os.path.basename(fn)
 
+        # Determine clean output title
+        clean_base = None
+        if task.title and not is_generic_title(task.title):
+            clean_base = sanitize_filename(task.title)
+
+        if clean_base:
+            out_template = os.path.join(download_dir, f"{clean_base}.%(ext)s")
+        else:
+            out_template = os.path.join(download_dir, "%(title).150s.%(ext)s")
+
         ydl_opts = {
-            "outtmpl": os.path.join(download_dir, "%(title).120B [%(id)s].%(ext)s"),
+            "outtmpl": out_template,
             "progress_hooks": [progress_hook],
             "postprocessor_hooks": [postprocessor_hook],
             "quiet": True,
@@ -326,8 +357,10 @@ class DownloadManager:
                 try:
                     info = ydl.extract_info(task.url, download=False)
                     if info:
-                        task.title = info.get("title") or task.title
-                        task.thumbnail = info.get("thumbnail")
+                        extracted = info.get("title")
+                        if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
+                            task.title = extracted
+                        task.thumbnail = info.get("thumbnail") or task.thumbnail
                 except Exception as extract_err:
                     logger.debug(f"Pre-extraction info non-fatal warning: {extract_err}")
 
@@ -337,7 +370,9 @@ class DownloadManager:
                 # Perform actual download
                 info = ydl.extract_info(task.url, download=True)
                 if info:
-                    task.title = info.get("title") or task.title
+                    extracted = info.get("title")
+                    if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
+                        task.title = extracted
                     task.thumbnail = info.get("thumbnail") or task.thumbnail
                     
                     # Determine final output file if not already detected
@@ -349,6 +384,9 @@ class DownloadManager:
                         if "_filename" in req:
                             task.filepath = os.path.abspath(req["_filename"])
                             task.filename = os.path.basename(req["_filename"])
+
+            if is_generic_title(task.title):
+                task.title = task.filename or f"Video {time.strftime('%Y-%m-%d %H:%M')}"
 
             task.status = "completed"
             task.progress = 100.0

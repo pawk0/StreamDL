@@ -255,7 +255,7 @@ body {
   font-weight: 600;
 }
 
-select {
+input[type="text"], select {
   width: 100%;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -264,13 +264,17 @@ select {
   padding: 7px 10px;
   font-size: 12px;
   outline: none;
+  font-family: inherit;
+}
+
+select {
   cursor: pointer;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
 }
 
-select:focus {
+input[type="text"]:focus, select:focus {
   border-color: var(--border-focus);
 }
 

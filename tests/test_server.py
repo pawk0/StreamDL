@@ -110,6 +110,23 @@ class TestServerAPI(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(self.manager.get_all_tasks()), 0)
 
+    def test_title_sanitization_and_generic_check(self):
+        from server.downloader import sanitize_filename, is_generic_title
+        
+        # Test sanitization of forbidden Windows characters
+        dirty_title = 'My Video: "Episode 1" <HD> / 2026? *special* | [m3u8]'
+        clean = sanitize_filename(dirty_title)
+        for char in '<>:"/\\|?*':
+            self.assertNotIn(char, clean)
+        self.assertEqual(clean, "My Video Episode 1 HD 2026 special [m3u8]")
+
+        # Test generic title detection
+        self.assertTrue(is_generic_title("master"))
+        self.assertTrue(is_generic_title("index"))
+        self.assertTrue(is_generic_title("index-f2-v1-a1"))
+        self.assertTrue(is_generic_title("manifest"))
+        self.assertFalse(is_generic_title("Eliota Intelligence Analysis"))
+
 
 if __name__ == "__main__":
     unittest.main()
