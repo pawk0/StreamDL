@@ -1,0 +1,7 @@
+{
+  "download_dir": "C:\\Users\\Pawel\\Downloads\\VideoDL",
+  "max_concurrent": 3,
+  "default_quality": "best",
+  "default_format": "mp4",
+  "port": 7921
+}
