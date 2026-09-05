@@ -8,7 +8,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const pageUrl = document.getElementById("page-url");
   
   const streamTypeBadge = document.getElementById("stream-type-badge");
+  const streamFilename = document.getElementById("stream-filename");
   const streamUrlText = document.getElementById("stream-url-text");
+  const btnCopyUrl = document.getElementById("btn-copy-url");
   const groupOtherStreams = document.getElementById("group-other-streams");
   const selectStreamChoice = document.getElementById("select-stream-choice");
   
@@ -34,6 +36,38 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 4500);
   }
 
+  // Copy Stream URL
+  if (btnCopyUrl) {
+    btnCopyUrl.addEventListener("click", () => {
+      if (currentStreamUrl) {
+        navigator.clipboard.writeText(currentStreamUrl);
+        showBanner("Stream URL copied to clipboard!", "success");
+      }
+    });
+  }
+
+  function extractFilename(url) {
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split("/").filter(Boolean);
+      return parts.pop() || "stream";
+    } catch (e) {
+      return url.split("?")[0].split("/").pop() || "stream";
+    }
+  }
+
+  function formatStreamLabel(stream) {
+    try {
+      const u = new URL(stream.url);
+      const fn = extractFilename(stream.url);
+      const host = u.hostname;
+      const prefix = stream.isMaster ? "⭐ [Master] " : "";
+      return `${prefix}${fn} (${host})`;
+    } catch (e) {
+      return stream.url.substring(0, 45) + "...";
+    }
+  }
+
   // Check Server Health
   async function checkServer() {
     try {
@@ -57,7 +91,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (tabs && tabs.length > 0) {
     activeTab = tabs[0];
     pageTitle.textContent = activeTab.title || "Active Tab";
+    pageTitle.title = activeTab.title || "";
     pageUrl.textContent = activeTab.url || "";
+    pageUrl.title = activeTab.url || "";
   }
 
   await checkServer();
@@ -77,6 +113,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           setupStreamSelection(detectedStreams);
         } else {
           streamTypeBadge.textContent = "None";
+          streamFilename.textContent = "No stream";
           streamUrlText.textContent = "No stream captured yet. Play video on the page or use 'Download Page URL'.";
           btnDownloadStream.disabled = true;
         }
@@ -86,31 +123,40 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function setupStreamSelection(streams) {
     btnDownloadStream.disabled = false;
-    currentStreamUrl = streams[0].url;
 
-    // Show stream type
-    const primary = streams[0];
-    streamTypeBadge.textContent = primary.isMaster ? "⭐ Master Playlist" : primary.type;
-    streamUrlText.textContent = primary.url;
+    function applyStream(stream) {
+      currentStreamUrl = stream.url;
+      streamTypeBadge.textContent = stream.isMaster ? "⭐ Master Playlist" : stream.type;
+      streamFilename.textContent = extractFilename(stream.url);
+      streamUrlText.textContent = stream.url;
+      streamUrlText.title = stream.url;
+    }
+
+    applyStream(streams[0]);
 
     if (streams.length > 1) {
       groupOtherStreams.style.display = "flex";
       selectStreamChoice.innerHTML = "";
-      streams.forEach((s, idx) => {
+      streams.forEach((s) => {
         const opt = document.createElement("option");
         opt.value = s.url;
-        opt.textContent = `${s.isMaster ? "[MASTER] " : ""}${s.type} - ${s.url.substring(0, 50)}...`;
+        opt.textContent = formatStreamLabel(s);
+        opt.title = s.url;
         selectStreamChoice.appendChild(opt);
       });
 
-      selectStreamChoice.addEventListener("change", () => {
+      selectStreamChoice.value = streams[0].url;
+      selectStreamChoice.title = streams[0].url;
+
+      selectStreamChoice.onchange = () => {
         const selected = streams.find((s) => s.url === selectStreamChoice.value);
         if (selected) {
-          currentStreamUrl = selected.url;
-          streamTypeBadge.textContent = selected.isMaster ? "⭐ Master Playlist" : selected.type;
-          streamUrlText.textContent = selected.url;
+          applyStream(selected);
+          selectStreamChoice.title = selected.url;
         }
-      });
+      };
+    } else {
+      groupOtherStreams.style.display = "none";
     }
   }
 

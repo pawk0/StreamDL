@@ -2,21 +2,63 @@
 const SERVER_URL = "http://localhost:7921";
 const streamsByTab = new Map();
 
-// Helper to determine stream type & priority
+// Helper to extract base stream directory key (e.g. protocol://host/path/without_filename)
+function getStreamKey(url) {
+  try {
+    const u = new URL(url);
+    const segments = u.pathname.split("/").filter(Boolean);
+    segments.pop(); // remove filename
+    return `${u.origin}/${segments.join("/")}`;
+  } catch (e) {
+    return url.split("?")[0];
+  }
+}
+
+// Helper to determine stream type, master vs variant status
 function analyzeStreamUrl(url) {
   const lower = url.toLowerCase();
   
   // Exclude segment chunks
-  if (lower.includes(".ts") || lower.includes(".m4s") || lower.includes(".aac") || lower.includes("segment-")) {
+  if (
+    lower.includes(".ts") ||
+    lower.includes(".m4s") ||
+    lower.includes(".aac") ||
+    lower.includes("segment-") ||
+    lower.includes("/seg-") ||
+    lower.includes("/fragment")
+  ) {
     return null;
   }
 
   let type = "other";
   let isMaster = false;
+  let isVariant = false;
+
+  const pathname = url.split("?")[0].toLowerCase();
+  const filename = pathname.split("/").pop() || "";
 
   if (lower.includes(".m3u8")) {
     type = "HLS (.m3u8)";
-    if (lower.includes("master") || lower.includes("index") || lower.includes("playlist") || lower.includes("manifest")) {
+    
+    // Check if this is a variant/child playlist (e.g. index-f2-v1-a1.m3u8, 720p.m3u8, chunklist)
+    if (
+      /[-_][fva]\d+/i.test(filename) ||
+      filename.includes("chunklist") ||
+      filename.includes("rendition") ||
+      filename.includes("tracks-") ||
+      /\b(1080p|720p|480p|360p|240p)\.m3u8/i.test(filename)
+    ) {
+      isVariant = true;
+      isMaster = false;
+    } else if (
+      filename === "master.m3u8" ||
+      filename === "playlist.m3u8" ||
+      filename === "manifest.m3u8" ||
+      filename === "index.m3u8" ||
+      filename === "main.m3u8" ||
+      filename.includes("master") ||
+      filename.includes("manifest")
+    ) {
       isMaster = true;
     }
   } else if (lower.includes(".mpd")) {
@@ -30,7 +72,7 @@ function analyzeStreamUrl(url) {
     return null;
   }
 
-  return { type, isMaster };
+  return { type, isMaster, isVariant, filename };
 }
 
 // Intercept network requests for media stream manifests and video URLs
@@ -42,33 +84,52 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (!streamInfo) return;
 
     let tabStreams = streamsByTab.get(details.tabId) || [];
-    
-    // Check if URL already recorded
-    const exists = tabStreams.some((s) => s.url === details.url);
-    if (!exists) {
+    const baseKey = getStreamKey(details.url);
+
+    // Check if we already have a stream from this exact video directory
+    const existingIndex = tabStreams.findIndex((s) => getStreamKey(s.url) === baseKey);
+
+    if (existingIndex !== -1) {
+      const existing = tabStreams[existingIndex];
+      // If the incoming stream is a MASTER playlist and the existing is only a variant, upgrade it!
+      if (streamInfo.isMaster && !existing.isMaster) {
+        tabStreams[existingIndex] = {
+          url: details.url,
+          type: streamInfo.type,
+          isMaster: true,
+          filename: streamInfo.filename,
+          timestamp: Date.now(),
+          initiator: details.initiator || details.documentUrl || "",
+        };
+      } else {
+        // Already have the master or an identical stream from this video session, ignore duplicate variant
+        return;
+      }
+    } else {
+      // New stream from a distinct video/source
       const streamObj = {
         url: details.url,
         type: streamInfo.type,
         isMaster: streamInfo.isMaster,
+        filename: streamInfo.filename,
         timestamp: Date.now(),
         initiator: details.initiator || details.documentUrl || "",
       };
 
-      // Place master playlists at the front of the list
       if (streamInfo.isMaster) {
         tabStreams.unshift(streamObj);
       } else {
         tabStreams.push(streamObj);
       }
-
-      // Limit memory to 20 streams per tab
-      if (tabStreams.length > 20) {
-        tabStreams = tabStreams.slice(0, 20);
-      }
-
-      streamsByTab.set(details.tabId, tabStreams);
-      updateBadge(details.tabId, tabStreams.length);
     }
+
+    // Limit memory to 20 streams per tab
+    if (tabStreams.length > 20) {
+      tabStreams = tabStreams.slice(0, 20);
+    }
+
+    streamsByTab.set(details.tabId, tabStreams);
+    updateBadge(details.tabId, tabStreams.length);
   },
   {
     urls: [
