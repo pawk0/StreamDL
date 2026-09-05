@@ -65,7 +65,7 @@ def resolve_doodstream(url: str, custom_headers: dict = None) -> Optional[Tuple[
             stream_base = resp.read().decode('utf-8', errors='ignore').strip()
 
         # Find token from JS
-        token_match = re.search(r"token=([a-zA-Z0-9]+)", html)
+        token_match = re.search(r"token=['\"]?([a-zA-Z0-9]+)", html)
         token = token_match.group(1) if token_match else "undefined"
 
         # Generate random 10 characters as required by Doodstream player
@@ -77,6 +77,8 @@ def resolve_doodstream(url: str, custom_headers: dict = None) -> Optional[Tuple[
             "User-Agent": headers["User-Agent"],
             "Referer": base_domain + "/"
         }
+        if custom_headers:
+            stream_headers.update(custom_headers)
         logger.info(f"Resolved Doodstream embed URL to direct stream: {direct_url[:50]}...")
         return direct_url, stream_headers
     except Exception as e:
@@ -119,6 +121,8 @@ def is_generic_title(title: Optional[str]) -> bool:
     if not title:
         return True
     t = title.strip().lower()
+    if not t:
+        return True
     return t in [
         "master", "index", "manifest", "playlist", "stream",
         "video", "fetching info...", "undefined", "unknown", "null"
