@@ -57,7 +57,9 @@ def queue_download():
     title = data.get("title")
     quality = data.get("quality", "best")
     fmt = data.get("format", "mp4")
-    headers = data.get("headers", {})
+    headers = dict(data.get("headers") or {})
+    if data.get("referer") and not headers.get("Referer") and not headers.get("referer"):
+        headers["Referer"] = data["referer"]
     provider_name = data.get("provider")
 
     task = manager.add_task(

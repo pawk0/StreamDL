@@ -97,7 +97,26 @@ function analyzeStreamUrl(url, typeHint = "", contentType = "") {
   return { type, isMaster, isVariant, filename };
 }
 
-function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "") {
+function extractHeaders(requestHeaders) {
+  const result = {};
+  if (!Array.isArray(requestHeaders)) return result;
+  for (const h of requestHeaders) {
+    if (!h.name || !h.value) continue;
+    const lower = h.name.toLowerCase();
+    if (lower === "referer") {
+      result["Referer"] = h.value;
+    } else if (lower === "origin") {
+      result["Origin"] = h.value;
+    } else if (lower === "user-agent") {
+      result["User-Agent"] = h.value;
+    } else if (lower === "cookie") {
+      result["Cookie"] = h.value;
+    }
+  }
+  return result;
+}
+
+function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "", headers = {}) {
   if (tabId < 0 || !url || !url.startsWith("http")) return;
 
   const streamInfo = analyzeStreamUrl(url, typeHint, contentType);
@@ -111,6 +130,9 @@ function registerStream(tabId, url, typeHint = "", contentType = "", referer = "
   if (exactIndex !== -1) {
     if (referer && !tabStreams[exactIndex].referer) {
       tabStreams[exactIndex].referer = referer;
+    }
+    if (headers && Object.keys(headers).length > 0) {
+      tabStreams[exactIndex].headers = { ...(tabStreams[exactIndex].headers || {}), ...headers };
     }
     return;
   }
@@ -127,6 +149,7 @@ function registerStream(tabId, url, typeHint = "", contentType = "", referer = "
         isMaster: true,
         filename: streamInfo.filename,
         referer: referer || existing.referer || "",
+        headers: { ...(existing.headers || {}), ...(headers || {}) },
         title: pageTitle || existing.title || "",
         timestamp: Date.now(),
       };
@@ -140,6 +163,7 @@ function registerStream(tabId, url, typeHint = "", contentType = "", referer = "
       isMaster: streamInfo.isMaster,
       filename: streamInfo.filename,
       referer: referer,
+      headers: headers || {},
       title: pageTitle,
       timestamp: Date.now(),
     };
@@ -241,6 +265,32 @@ chrome.webRequest.onHeadersReceived.addListener(
   ["responseHeaders"]
 );
 
+// 4. Intercept request headers to capture Referer, Origin, User-Agent, Cookie for streams
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    if (details.tabId < 0 || !details.url) return;
+    const captured = extractHeaders(details.requestHeaders);
+    if (Object.keys(captured).length === 0) return;
+
+    const tabStreams = streamsByTab.get(details.tabId);
+    if (!tabStreams) return;
+
+    const baseKey = getStreamKey(details.url);
+    for (const s of tabStreams) {
+      if (s.url === details.url || getStreamKey(s.url) === baseKey) {
+        s.headers = { ...(s.headers || {}), ...captured };
+        if (captured["Referer"] && !s.referer) {
+          s.referer = captured["Referer"];
+        }
+      }
+    }
+  },
+  {
+    urls: ["<all_urls>"]
+  },
+  ["requestHeaders", "extraHeaders"]
+);
+
 // Update badge count on extension icon
 function updateBadge(tabId, count) {
   if (count > 0) {
@@ -277,10 +327,20 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const targetUrl = info.srcUrl || info.linkUrl || info.pageUrl || (tab && tab.url);
     if (!targetUrl) return;
 
+    let streamHeaders = {};
+    if (tab && tab.id) {
+      const tabStreams = streamsByTab.get(tab.id) || [];
+      const matched = tabStreams.find((s) => s.url === targetUrl);
+      if (matched && matched.headers) {
+        streamHeaders = matched.headers;
+      }
+    }
+
     await sendDownloadRequest({
       url: targetUrl,
       title: tab ? tab.title : undefined,
-      referer: tab ? tab.url : undefined
+      referer: tab ? tab.url : undefined,
+      headers: streamHeaders
     });
   }
 });
@@ -313,11 +373,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Send download command to local Flask server
-async function sendDownloadRequest({ url, title, referer, provider, quality = "best", format = "mp4" }) {
+async function sendDownloadRequest({ url, title, referer, headers: customHeaders, provider, quality = "best", format = "mp4" }) {
   try {
-    const headers = {};
-    if (referer) {
+    const headers = { ...(customHeaders || {}) };
+    if (referer && !headers["Referer"] && !headers["referer"]) {
       headers["Referer"] = referer;
+    }
+    const refVal = headers["Referer"] || headers["referer"];
+    if (refVal && !headers["Origin"] && !headers["origin"]) {
+      try {
+        const refUrl = new URL(refVal);
+        headers["Origin"] = refUrl.origin;
+      } catch (e) {}
     }
 
     const res = await fetch(`${SERVER_URL}/api/download`, {

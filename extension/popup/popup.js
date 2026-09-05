@@ -260,10 +260,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       const selectedStream = detectedStreams.find((s) => s.url === currentStreamUrl);
       const streamReferer = selectedStream?.referer || (activeTab ? activeTab.url : undefined);
 
+      const capturedHeaders = { ...(selectedStream?.headers || {}) };
+      if (streamReferer && !capturedHeaders["Referer"] && !capturedHeaders["referer"]) {
+        capturedHeaders["Referer"] = streamReferer;
+      }
+      if (!capturedHeaders["User-Agent"] && !capturedHeaders["user-agent"] && typeof navigator !== "undefined" && navigator.userAgent) {
+        capturedHeaders["User-Agent"] = navigator.userAgent;
+      }
+      const refForOrigin = capturedHeaders["Referer"] || capturedHeaders["referer"];
+      if (refForOrigin && !capturedHeaders["Origin"] && !capturedHeaders["origin"]) {
+        try {
+          const refUrl = new URL(refForOrigin);
+          capturedHeaders["Origin"] = refUrl.origin;
+        } catch (e) {}
+      }
+
       const payload = {
         url: currentStreamUrl,
         title: chosenTitle,
         referer: streamReferer,
+        headers: capturedHeaders,
         provider: detectProvider(currentStreamUrl, streamReferer),
         quality: selectQuality.value,
         format: selectFormat.value,
@@ -298,11 +314,22 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       const chosenTitle = (inputVideoTitle ? inputVideoTitle.value.trim() : "") || (activeTab ? activeTab.title : undefined);
+      const headers = {};
+      if (activeTab.url) {
+        headers["Referer"] = activeTab.url;
+        try {
+          headers["Origin"] = new URL(activeTab.url).origin;
+        } catch (e) {}
+      }
+      if (typeof navigator !== "undefined" && navigator.userAgent) {
+        headers["User-Agent"] = navigator.userAgent;
+      }
 
       const payload = {
         url: activeTab.url,
         title: chosenTitle,
         referer: activeTab.url,
+        headers: headers,
         provider: detectProvider(activeTab.url, activeTab.url),
         quality: selectQuality.value,
         format: selectFormat.value,

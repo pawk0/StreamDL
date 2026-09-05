@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+import urllib.parse
 from typing import Any, Callable, Dict, Optional
 
 import yt_dlp
@@ -14,6 +15,18 @@ from server.task import DownloadTask
 from server.utils import format_bytes, format_eta, is_generic_title, sanitize_filename
 
 logger = logging.getLogger("video_dl.engine")
+
+DEFAULT_HTTP_HEADERS: Dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Site": "cross-site",
+}
 
 
 def build_ydl_options(
@@ -73,9 +86,36 @@ def build_ydl_options(
         if target_fmt in ["mp4", "mkv"]:
             ydl_opts["merge_output_format"] = target_fmt
 
-    # Pass custom HTTP headers (e.g. Referer, User-Agent) if provided
+    # Prepare HTTP headers with modern browser defaults and CORS player semantics
+    headers = dict(DEFAULT_HTTP_HEADERS)
     if custom_headers:
-        ydl_opts["http_headers"] = custom_headers
+        for k, v in custom_headers.items():
+            if not v:
+                continue
+            k_lower = k.lower()
+            if k_lower == "user-agent":
+                headers["User-Agent"] = v
+            elif k_lower == "referer":
+                headers["Referer"] = v
+            elif k_lower == "origin":
+                headers["Origin"] = v
+            elif k_lower == "cookie":
+                headers["Cookie"] = v
+            else:
+                headers[k] = v
+
+    # Auto-derive Origin from Referer if missing
+    referer_val = headers.get("Referer")
+    if referer_val and not headers.get("Origin"):
+        try:
+            parsed_ref = urllib.parse.urlparse(referer_val)
+            if parsed_ref.scheme and parsed_ref.netloc:
+                headers["Origin"] = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
+        except Exception:
+            pass
+
+    ydl_opts["http_headers"] = headers
+    ydl_opts["concurrent_fragment_downloads"] = 1
 
     return ydl_opts
 

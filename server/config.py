@@ -27,6 +27,12 @@ DEFAULT_PROVIDERS: List[Dict] = [
         "name": "Doodstream",
         "patterns": ["*dood*", "*cloudatacdn.com*"],
         "max_concurrent": 1
+    },
+    {
+        "id": "lulustream",
+        "name": "LuluStream",
+        "patterns": ["*cdn-tnmr.org*", "*lulustream*", "*luluvdo*", "*luluvid*", "*lulu.st*"],
+        "max_concurrent": 1
     }
 ]
 

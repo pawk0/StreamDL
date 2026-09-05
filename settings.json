@@ -1,6 +1,6 @@
 {
   "download_dir": "C:\\Users\\Pawel\\Downloads\\VideoDL",
-  "max_concurrent": 3,
+  "max_concurrent": 8,
   "max_concurrent_per_provider": 1,
   "providers": [
     {
@@ -9,6 +9,42 @@
       "patterns": [
         "*dood*",
         "*cloudatacdn.com*"
+      ],
+      "max_concurrent": 1
+    },
+    {
+      "id": "eliotaintelligence",
+      "name": "Eliotaintelligence",
+      "patterns": [
+        "*eliotaintelligence.org*"
+      ],
+      "max_concurrent": 1
+    },
+    {
+      "id": "voesx",
+      "name": "voe.sx",
+      "patterns": [
+        "*cloudwindow-route.com*"
+      ],
+      "max_concurrent": 1
+    },
+    {
+      "id": "byse",
+      "name": "Byse",
+      "patterns": [
+        "*r66nv9ed.com*"
+      ],
+      "max_concurrent": 1
+    },
+    {
+      "id": "lulustream",
+      "name": "LuluStream",
+      "patterns": [
+        "*cdn-tnmr.org*",
+        "*lulustream*",
+        "*luluvdo*",
+        "*luluvid*",
+        "*lulu.st*"
       ],
       "max_concurrent": 1
     }
