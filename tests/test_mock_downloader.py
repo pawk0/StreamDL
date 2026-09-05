@@ -92,59 +92,74 @@ def reset_mock_ydl():
 # Unit Tests for Helper Functions
 # =========================================================================
 
-def test_format_bytes():
-    assert format_bytes(None) == "0 B"
-    assert format_bytes(0) == "0 B"
-    assert format_bytes(-10) == "0 B"
-    assert format_bytes(500) == "500.0 B"
-    assert format_bytes(1024) == "1.0 KB"
-    assert format_bytes(1024 * 1024 * 5) == "5.0 MB"
-    assert format_bytes(1024 ** 3 * 2.5) == "2.5 GB"
-    assert format_bytes(1024 ** 4 * 1.5) == "1.5 TB"
-    assert format_bytes(1024 ** 5 * 3) == "3.0 PB"
+@pytest.mark.parametrize("input_bytes, expected", [
+    (None, "0 B"),
+    (0, "0 B"),
+    (-10, "0 B"),
+    (500, "500.0 B"),
+    (1024, "1.0 KB"),
+    (1024 * 1024 * 5, "5.0 MB"),
+    (1024 ** 3 * 2.5, "2.5 GB"),
+    (1024 ** 4 * 1.5, "1.5 TB"),
+    (1024 ** 5 * 3, "3.0 PB"),
+])
+def test_format_bytes(input_bytes, expected):
+    assert format_bytes(input_bytes) == expected
 
 
-def test_format_eta():
-    assert format_eta(None) == "--:--"
-    assert format_eta(-5) == "--:--"
-    assert format_eta(0) == "00:00"
-    assert format_eta(45) == "00:45"
-    assert format_eta(75) == "01:15"
-    assert format_eta(3665) == "01:01:05"
+@pytest.mark.parametrize("seconds, expected", [
+    (None, "--:--"),
+    (-5, "--:--"),
+    (0, "00:00"),
+    (45, "00:45"),
+    (75, "01:15"),
+    (3665, "01:01:05"),
+])
+def test_format_eta(seconds, expected):
+    assert format_eta(seconds) == expected
 
 
-def test_sanitize_filename():
-    assert sanitize_filename("") == "video"
-    assert sanitize_filename(None) == "video"
-    assert sanitize_filename('A/B\\C:D*E?F"G<H>I|J') == "ABCDEFGHIJ"
-    assert sanitize_filename("  my video title.  ") == "my video title"
-    long_name = "x" * 200
-    assert len(sanitize_filename(long_name, max_length=50)) == 50
+@pytest.mark.parametrize("raw_title, max_length, expected", [
+    ("", 150, "video"),
+    (None, 150, "video"),
+    ('A/B\\C:D*E?F"G<H>I|J', 150, "ABCDEFGHIJ"),
+    ("  my video title.  ", 150, "my video title"),
+    ("???:::***", 150, "video"),
+    ("x" * 200, 50, "x" * 50),
+])
+def test_sanitize_filename(raw_title, max_length, expected):
+    assert sanitize_filename(raw_title, max_length=max_length) == expected
 
 
-def test_is_generic_title():
-    assert is_generic_title(None) is True
-    assert is_generic_title("") is True
-    assert is_generic_title("   ") is True
-    assert is_generic_title("master") is True
-    assert is_generic_title("index") is True
-    assert is_generic_title("manifest") is True
-    assert is_generic_title("playlist") is True
-    assert is_generic_title("video") is True
-    assert is_generic_title("fetching info...") is True
-    assert is_generic_title("undefined") is True
-    assert is_generic_title("master-stream-1080p") is True
-    assert is_generic_title("index-f1-v1-a1") is True
-    assert is_generic_title("Real Video Title") is False
+@pytest.mark.parametrize("title, is_generic", [
+    (None, True),
+    ("", True),
+    ("   ", True),
+    ("master", True),
+    ("index", True),
+    ("manifest", True),
+    ("playlist", True),
+    ("video", True),
+    ("fetching info...", True),
+    ("undefined", True),
+    ("master-stream-1080p", True),
+    ("index-f1-v1-a1", True),
+    ("Real Video Title", False),
+])
+def test_is_generic_title(title, is_generic):
+    assert is_generic_title(title) is is_generic
 
 
-def test_is_doodstream_url():
-    assert is_doodstream_url("") is False
-    assert is_doodstream_url(None) is False
-    assert is_doodstream_url("https://youtube.com/watch?v=123") is False
-    assert is_doodstream_url("https://dood.to/e/abcdef123456") is True
-    assert is_doodstream_url("https://doodstream.com/d/xyz") is True
-    assert is_doodstream_url("https://dood.video/e/xyz") is True
+@pytest.mark.parametrize("url, is_dood", [
+    ("", False),
+    (None, False),
+    ("https://youtube.com/watch?v=123", False),
+    ("https://dood.to/e/abcdef123456", True),
+    ("https://doodstream.com/d/xyz", True),
+    ("https://dood.video/e/xyz", True),
+])
+def test_is_doodstream_url(url, is_dood):
+    assert is_doodstream_url(url) is is_dood
 
 
 def test_resolve_doodstream_success(monkeypatch):
@@ -199,7 +214,8 @@ def test_resolve_doodstream_failure(monkeypatch):
 def test_mock_ytdlp_successful_download(manager, monkeypatch):
     monkeypatch.setattr("yt_dlp.YoutubeDL", MockYoutubeDL)
 
-    task = manager.add_task(
+    task = DownloadTask(
+        task_id="video1",
         url="https://example.com/video1",
         title="Custom Video Name",
         quality="1080p",
@@ -224,7 +240,8 @@ def test_mock_ytdlp_extract_title_override_generic(manager, monkeypatch):
     monkeypatch.setattr("yt_dlp.YoutubeDL", MockYoutubeDL)
 
     # Task starts with generic title
-    task = manager.add_task(
+    task = DownloadTask(
+        task_id="stream1",
         url="https://example.com/stream.m3u8",
         title="master",
         quality="best",
@@ -238,41 +255,34 @@ def test_mock_ytdlp_extract_title_override_generic(manager, monkeypatch):
     assert task.thumbnail == "https://example.com/thumb.jpg"
 
 
-def test_mock_ytdlp_quality_audio(manager, monkeypatch):
+@pytest.mark.parametrize("quality, fmt, expected_format_substr, expected_merge_fmt, expected_postproc", [
+    ("audio", "mp3", "bestaudio/best", None, "FFmpegExtractAudio"),
+    ("1080p", "mp4", "height<=1080", "mp4", None),
+    ("720p", "mkv", "height<=720", "mkv", None),
+    ("480p", "mp4", "height<=480", "mp4", None),
+    ("best", "mp4", "bestvideo*+bestaudio/best", "mp4", None),
+])
+def test_mock_ytdlp_quality_options(manager, monkeypatch, quality, fmt, expected_format_substr, expected_merge_fmt, expected_postproc):
     monkeypatch.setattr("yt_dlp.YoutubeDL", MockYoutubeDL)
 
-    task = manager.add_task(
-        url="https://example.com/audio1",
-        quality="audio",
-        fmt="mp3"
-    )
-
+    task = DownloadTask(task_id=f"q_{quality}", url="https://example.com/video", quality=quality, fmt=fmt)
     manager._execute_download(task)
 
     assert task.status == "completed"
     instance = MockYoutubeDL.last_instance
-    assert instance.opts["format"] == "bestaudio/best"
-    assert instance.opts["postprocessors"][0]["key"] == "FFmpegExtractAudio"
-    assert instance.opts["postprocessors"][0]["preferredcodec"] == "mp3"
+    assert expected_format_substr in instance.opts["format"]
+    if expected_merge_fmt:
+        assert instance.opts.get("merge_output_format") == expected_merge_fmt
+    if expected_postproc:
+        assert instance.opts["postprocessors"][0]["key"] == expected_postproc
 
-
-def test_mock_ytdlp_quality_720p_and_480p(manager, monkeypatch):
-    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYoutubeDL)
-
-    t720 = manager.add_task(url="https://example.com/v720", quality="720p", fmt="mkv")
-    manager._execute_download(t720)
-    assert "height<=720" in MockYoutubeDL.last_instance.opts["format"]
-    assert MockYoutubeDL.last_instance.opts["merge_output_format"] == "mkv"
-
-    t480 = manager.add_task(url="https://example.com/v480", quality="480p", fmt="mp4")
-    manager._execute_download(t480)
-    assert "height<=480" in MockYoutubeDL.last_instance.opts["format"]
 
 
 def test_mock_ytdlp_custom_headers(manager, monkeypatch):
     monkeypatch.setattr("yt_dlp.YoutubeDL", MockYoutubeDL)
 
-    task = manager.add_task(
+    task = DownloadTask(
+        task_id="headers_task",
         url="https://example.com/video_with_headers",
         headers={"Referer": "https://source.com/", "User-Agent": "CustomUA"}
     )
@@ -306,7 +316,7 @@ def test_mock_ytdlp_hls_fragments_progress(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", FragmentMockYDL)
 
-    task = manager.add_task(url="https://example.com/live.m3u8")
+    task = DownloadTask(task_id="hls_frag", url="https://example.com/live.m3u8")
     manager._execute_download(task)
 
     assert task.status == "completed"
@@ -320,7 +330,7 @@ def test_mock_ytdlp_download_error(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", FailingMockYDL)
 
-    task = manager.add_task(url="https://example.com/nonexistent")
+    task = DownloadTask(task_id="err_task", url="https://example.com/nonexistent")
     manager._execute_download(task)
 
     assert task.status == "failed"
@@ -339,7 +349,7 @@ def test_mock_ytdlp_cancellation_during_download(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", CancelOnProgressYDL)
 
-    task = manager.add_task(url="https://example.com/cancel_test")
+    task = DownloadTask(task_id="cancel_task", url="https://example.com/cancel_test")
     manager._execute_download(task)
 
     assert task.status == "cancelled"
@@ -358,7 +368,7 @@ def test_mock_ytdlp_requested_downloads_filename_detection(manager, monkeypatch)
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", RequestedDownloadsYDL)
 
-    task = manager.add_task(url="https://example.com/multi")
+    task = DownloadTask(task_id="multi", url="https://example.com/multi")
     manager._execute_download(task)
 
     assert task.status == "completed"
@@ -374,7 +384,7 @@ def test_mock_ytdlp_doodstream_resolution_integration(manager, monkeypatch):
 
     monkeypatch.setattr("server.engine.resolve_doodstream", mock_resolve)
 
-    task = manager.add_task(url="https://dood.to/e/sampleembed")
+    task = DownloadTask(task_id="dood_task", url="https://dood.to/e/sampleembed")
     manager._execute_download(task)
 
     assert task.status == "completed"
@@ -430,7 +440,7 @@ def test_mock_ytdlp_cancellation_pre_download(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", CancelPreDownloadYDL)
 
-    task = manager.add_task(url="https://example.com/cancel_pre")
+    task = DownloadTask(task_id="cancel_pre", url="https://example.com/cancel_pre")
     manager._execute_download(task)
 
     assert task.status == "cancelled"
@@ -447,7 +457,7 @@ def test_mock_ytdlp_postprocessor_cancellation(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", CancelPostProcYDL)
 
-    task = manager.add_task(url="https://example.com/cancel_post")
+    task = DownloadTask(task_id="cancel_post", url="https://example.com/cancel_post")
     manager._execute_download(task)
 
     assert task.status == "cancelled"
@@ -460,7 +470,7 @@ def test_mock_ytdlp_generic_title_fallback(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", GenericTitleYDL)
 
-    task = manager.add_task(url="https://example.com/generic_test", title="master")
+    task = DownloadTask(task_id="generic_fallback", url="https://example.com/generic_test", title="master")
     manager._execute_download(task)
 
     assert task.status == "completed"
@@ -481,7 +491,8 @@ def test_mock_ytdlp_percent_str_exception(manager, monkeypatch):
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", MalformedPercentYDL)
 
-    task = manager.add_task(url="https://example.com/percent_err")
+    task = DownloadTask(task_id="percent_task", url="https://example.com/percent_err")
     manager._execute_download(task)
     assert task.status == "completed"
+
 

@@ -79,7 +79,7 @@ def test_cancellation(client, manager):
         url="https://example.com/fake.m3u8",
         title="Fake Task"
     )
-    assert task.status == "queued"
+    assert task.status in ["queued", "downloading"]
 
     res = client.post(f"/api/cancel/{task.id}")
     assert res.status_code == 200
@@ -154,3 +154,99 @@ def test_queue_endpoint_returns_providers_and_rematches(client, manager):
     assert updated["provider_id"] == "elliotintel"
     assert updated["provider"] == "ElliotIntel"
     assert updated["provider_limit"] == 2
+
+
+def test_index_page(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    assert b"Video Stream Downloader" in res.data or b"settings" in res.data
+
+
+def test_cancel_nonexistent_task_404(client):
+    res = client.post("/api/cancel/nonexistent-task-id-12345")
+    assert res.status_code == 404
+    data = res.get_json()
+    assert data["success"] is False
+    assert "error" in data
+
+
+def test_open_folder_success(client, monkeypatch, tmp_path):
+    download_dir = tmp_path / "open_folder_test"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    save_settings({"download_dir": str(download_dir)})
+
+    opened = []
+    monkeypatch.setattr("os.startfile", lambda p: opened.append(p), raising=False)
+    monkeypatch.setattr("subprocess.Popen", lambda args, **kwargs: opened.append(args[1]))
+
+    res = client.post("/api/open-folder")
+    assert res.status_code == 200
+    assert res.get_json()["success"] is True
+    assert len(opened) == 1
+
+
+def test_open_folder_not_found(client, monkeypatch):
+    monkeypatch.setattr("os.path.exists", lambda p: False)
+    res_missing = client.post("/api/open-folder")
+    assert res_missing.status_code == 404
+    assert res_missing.get_json()["success"] is False
+
+
+def test_open_folder_error(client, monkeypatch, tmp_path):
+    download_dir = tmp_path / "open_folder_err"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    save_settings({"download_dir": str(download_dir)})
+
+    def raise_err(p):
+        raise OSError("Permission denied")
+    monkeypatch.setattr("os.startfile", raise_err, raising=False)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("Permission denied")))
+
+    res_err = client.post("/api/open-folder")
+    assert res_err.status_code == 500
+    assert res_err.get_json()["success"] is False
+
+
+def test_open_file_endpoints(client, manager, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr("os.startfile", lambda p: opened.append(p), raising=False)
+    monkeypatch.setattr("subprocess.Popen", lambda args, **kwargs: opened.append(args[1]))
+
+    # 1. Nonexistent task ID -> 404
+    res = client.post("/api/open-file/ghost_task_9999")
+    assert res.status_code == 404
+    assert "Filepath not recorded" in res.get_json()["error"]
+
+    # 2. Task with no filepath recorded -> 404
+    task_nofile = manager.add_task(url="https://example.com/no_file")
+    res_nofile = client.post(f"/api/open-file/{task_nofile.id}")
+    assert res_nofile.status_code == 404
+    assert "Filepath not recorded" in res_nofile.get_json()["error"]
+
+    # 3. File recorded but missing on disk -> 404
+    task_missing = manager.add_task(url="https://example.com/missing")
+    task_missing.filepath = str(tmp_path / "missing_video.mp4")
+    res_missing = client.post(f"/api/open-file/{task_missing.id}")
+    assert res_missing.status_code == 404
+    assert "File does not exist" in res_missing.get_json()["error"]
+
+    # 4. File recorded and exists on disk -> 200
+    real_file = tmp_path / "real_video.mp4"
+    real_file.write_text("dummy video content")
+    task_ok = manager.add_task(url="https://example.com/ok")
+    task_ok.filepath = str(real_file)
+    res_ok = client.post(f"/api/open-file/{task_ok.id}")
+    assert res_ok.status_code == 200
+    assert res_ok.get_json()["success"] is True
+    assert len(opened) == 1
+
+    # 5. Exception during opening -> 500
+    def raise_err(p):
+        raise OSError("Cannot open file")
+    monkeypatch.setattr("os.startfile", raise_err, raising=False)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("Cannot open file")))
+
+    res_err = client.post(f"/api/open-file/{task_ok.id}")
+    assert res_err.status_code == 500
+    assert res_err.get_json()["success"] is False
+

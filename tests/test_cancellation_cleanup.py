@@ -346,4 +346,29 @@ def test_cancellation_does_not_affect_files_with_similar_names(tmp_path, cancell
         similar_handle.close()
 
 
+def test_cleanup_nonexistent_directory(tmp_path):
+    task = DownloadTask("t_ghost", "https://example.com/v")
+    assert cleanup_task_files(task, download_dir=str(tmp_path / "ghost_dir_123")) == []
+
+
+def test_release_file_handles_empty():
+    assert release_file_handles("dummy_dir", task_filepaths=[]) == 0
+    assert release_file_handles("dummy_dir", task_filepaths=None) == 0
+
+
+def test_cleanup_with_tracked_files(tmp_path):
+    download_dir = str(tmp_path / "tracked_dir")
+    os.makedirs(download_dir, exist_ok=True)
+    task = DownloadTask("t_tracked", "https://example.com/tracked")
+    p1 = os.path.join(download_dir, "frag1.part")
+    with open(p1, "wb") as f:
+        f.write(b"data")
+    task.tracked_files.add(p1)
+    task.status = "cancelled"
+    deleted = cleanup_task_files(task, download_dir)
+    assert p1 in deleted
+    assert not os.path.exists(p1)
+
+
+
 
