@@ -159,6 +159,170 @@ class TestConcurrency(unittest.TestCase):
             for t in [t1, t2, t3, t4]:
                 self.manager.cancel_task(t.id)
 
+    def test_decrease_global_concurrency_below_active_downloads(self):
+        # Start with max_concurrent: 3
+        save_settings({"max_concurrent": 3, "max_concurrent_per_provider": 3})
+
+        executed_tasks = []
+        completed_tasks = set()
+
+        def mock_execute(task: DownloadTask):
+            executed_tasks.append(task.id)
+            task.status = "downloading"
+            while not task.cancel_requested and task.id not in completed_tasks:
+                time.sleep(0.05)
+            if task.id in completed_tasks:
+                task.status = "completed"
+            else:
+                task.status = "cancelled"
+
+        with patch.object(self.manager, "_execute_download", side_effect=mock_execute):
+            t1 = self.manager.add_task("https://example.com/1")
+            t2 = self.manager.add_task("https://example.com/2")
+            t3 = self.manager.add_task("https://example.com/3")
+            t4 = self.manager.add_task("https://example.com/4")
+
+            # Wait for dispatcher loop to start tasks up to initial limit of 3
+            time.sleep(0.9)
+
+            self.assertEqual(len(executed_tasks), 3)
+            self.assertIn(t1.id, executed_tasks)
+            self.assertIn(t2.id, executed_tasks)
+            self.assertIn(t3.id, executed_tasks)
+            self.assertEqual(self.manager.get_task(t4.id)["status"], "queued")
+
+            # Dynamically decrease max_concurrent from 3 down to 1
+            save_settings({"max_concurrent": 1, "max_concurrent_per_provider": 3})
+            time.sleep(0.9)
+
+            # Active downloads must NOT be cancelled or interrupted
+            self.assertEqual(self.manager.get_task(t1.id)["status"], "downloading")
+            self.assertEqual(self.manager.get_task(t2.id)["status"], "downloading")
+            self.assertEqual(self.manager.get_task(t3.id)["status"], "downloading")
+
+            # t4 must STILL be queued because active count (3) exceeds new max_concurrent (1)
+            self.assertEqual(len(executed_tasks), 3)
+            self.assertEqual(self.manager.get_task(t4.id)["status"], "queued")
+
+            # Complete task 1: active downloads drops to 2 (still > new limit of 1)
+            completed_tasks.add(t1.id)
+            time.sleep(0.9)
+            self.assertEqual(self.manager.get_task(t1.id)["status"], "completed")
+            self.assertEqual(len(executed_tasks), 3)
+            self.assertEqual(self.manager.get_task(t4.id)["status"], "queued")
+
+            # Complete task 2: active downloads drops to 1 (still >= new limit of 1)
+            completed_tasks.add(t2.id)
+            time.sleep(0.9)
+            self.assertEqual(self.manager.get_task(t2.id)["status"], "completed")
+            self.assertEqual(len(executed_tasks), 3)
+            self.assertEqual(self.manager.get_task(t4.id)["status"], "queued")
+
+            # Complete task 3: active downloads drops to 0 (now < new limit of 1)
+            completed_tasks.add(t3.id)
+            time.sleep(0.9)
+            self.assertEqual(self.manager.get_task(t3.id)["status"], "completed")
+
+            # Now task 4 should have been picked up and started!
+            self.assertEqual(len(executed_tasks), 4)
+            self.assertIn(t4.id, executed_tasks)
+            self.assertEqual(self.manager.get_task(t4.id)["status"], "downloading")
+
+            # Clean up
+            completed_tasks.add(t4.id)
+            time.sleep(0.2)
+
+    def test_decrease_provider_concurrency_below_active_downloads(self):
+        # Global max: 4, custom provider initial limit: 2
+        save_settings({
+            "max_concurrent": 4,
+            "max_concurrent_per_provider": 2,
+            "providers": [
+                {
+                    "id": "restricted_prov",
+                    "name": "RestrictedProvider",
+                    "patterns": ["*restricted-host.com*"],
+                    "max_concurrent": 2
+                }
+            ]
+        })
+
+        executed_tasks = []
+        completed_tasks = set()
+
+        def mock_execute(task: DownloadTask):
+            executed_tasks.append(task.id)
+            task.status = "downloading"
+            while not task.cancel_requested and task.id not in completed_tasks:
+                time.sleep(0.05)
+            if task.id in completed_tasks:
+                task.status = "completed"
+            else:
+                task.status = "cancelled"
+
+        with patch.object(self.manager, "_execute_download", side_effect=mock_execute):
+            p1 = self.manager.add_task("https://stream1.restricted-host.com/vid1.mp4")
+            p2 = self.manager.add_task("https://stream2.restricted-host.com/vid2.mp4")
+            p3 = self.manager.add_task("https://stream3.restricted-host.com/vid3.mp4")
+
+            self.assertEqual(p1.provider_id, "restricted_prov")
+            self.assertEqual(p2.provider_id, "restricted_prov")
+            self.assertEqual(p3.provider_id, "restricted_prov")
+
+            # Wait for dispatcher to start p1 and p2 (up to provider limit 2)
+            time.sleep(0.9)
+
+            self.assertEqual(len(executed_tasks), 2)
+            self.assertIn(p1.id, executed_tasks)
+            self.assertIn(p2.id, executed_tasks)
+            self.assertEqual(self.manager.get_task(p3.id)["status"], "queued")
+
+            # Now dynamically reduce restricted_prov max_concurrent from 2 down to 1
+            updated_settings = {
+                "max_concurrent": 4,
+                "max_concurrent_per_provider": 1,
+                "providers": [
+                    {
+                        "id": "restricted_prov",
+                        "name": "RestrictedProvider",
+                        "patterns": ["*restricted-host.com*"],
+                        "max_concurrent": 1
+                    }
+                ]
+            }
+            save_settings(updated_settings)
+            self.manager.rematch_providers(updated_settings)
+            time.sleep(0.9)
+
+            # Both active downloads continue running uninterrupted
+            self.assertEqual(self.manager.get_task(p1.id)["status"], "downloading")
+            self.assertEqual(self.manager.get_task(p2.id)["status"], "downloading")
+
+            # p3 must remain queued because active for provider (2) >= new provider limit (1)
+            self.assertEqual(len(executed_tasks), 2)
+            self.assertEqual(self.manager.get_task(p3.id)["status"], "queued")
+
+            # Complete p1: active count for provider is now 1 (which meets new limit 1)
+            completed_tasks.add(p1.id)
+            time.sleep(0.9)
+            self.assertEqual(self.manager.get_task(p1.id)["status"], "completed")
+            self.assertEqual(len(executed_tasks), 2)
+            self.assertEqual(self.manager.get_task(p3.id)["status"], "queued")
+
+            # Complete p2: active count for provider is now 0 (< 1)
+            completed_tasks.add(p2.id)
+            time.sleep(0.9)
+            self.assertEqual(self.manager.get_task(p2.id)["status"], "completed")
+
+            # Now p3 should have started downloading!
+            self.assertEqual(len(executed_tasks), 3)
+            self.assertIn(p3.id, executed_tasks)
+            self.assertEqual(self.manager.get_task(p3.id)["status"], "downloading")
+
+            # Clean up
+            completed_tasks.add(p3.id)
+            time.sleep(0.2)
+
 
 if __name__ == "__main__":
     unittest.main()
