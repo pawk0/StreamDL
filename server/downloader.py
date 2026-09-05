@@ -1,351 +1,34 @@
-import os
-import re
-import time
-import uuid
 import logging
 import threading
-import urllib.request
-import urllib.parse
-import random
-import string
-import gc
-import io
-from typing import Dict, List, Optional, Tuple, Set, Iterable
-import yt_dlp
+import time
+import uuid
+from typing import Dict, List, Optional
 
+from server.cleanup import (
+    cleanup_task_files,
+    release_file_handles,
+    remove_file_with_retry,
+)
 from server.config import load_settings, match_provider
+from server.engine import build_ydl_options, execute_download
+from server.resolvers import is_doodstream_url, resolve_doodstream
+from server.task import DownloadTask
+from server.utils import (
+    format_bytes,
+    format_eta,
+    is_generic_title,
+    sanitize_filename,
+)
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def is_doodstream_url(url: str) -> bool:
-    if not url:
-        return False
-    lower = url.lower()
-    return any(domain in lower for domain in [
-        "dood.re", "dood.to", "dood.so", "dood.ws", "dood.cx",
-        "dood.sh", "dood.la", "dood.watch", "doodstream.com", "dood.video", "dood.pm", "dood.wf"
-    ])
-
-
-def resolve_doodstream(url: str, custom_headers: dict = None) -> Optional[Tuple[str, dict]]:
-    """
-    Resolves a Doodstream page/embed URL (e.g. /e/xxx or /d/xxx) into the direct streaming media URL.
-    Returns (direct_stream_url, headers_dict) or None if failed.
-    """
-    try:
-        # Convert /d/ (download) to /e/ (embed)
-        embed_url = re.sub(r'/(d)/', '/e/', url)
-        domain = urllib.parse.urlparse(embed_url).netloc
-        base_domain = f"https://{domain}"
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Referer": embed_url
-        }
-        if custom_headers:
-            headers.update(custom_headers)
-
-        req = urllib.request.Request(embed_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            html = resp.read().decode('utf-8', errors='ignore')
-
-        # Find pass_md5 path: /pass_md5/...
-        pass_match = re.search(r"(/pass_md5/[a-zA-Z0-9_\-]+)", html)
-        if not pass_match:
-            pass_match = re.search(r"\$\.get\('(/pass_md5/[^']+)'", html)
-        if not pass_match:
-            return None
-
-        pass_path = pass_match.group(1)
-        pass_url = f"{base_domain}{pass_path}"
-
-        # Fetch pass_url to get base stream URL prefix
-        pass_req = urllib.request.Request(pass_url, headers=headers)
-        with urllib.request.urlopen(pass_req, timeout=12) as resp:
-            stream_base = resp.read().decode('utf-8', errors='ignore').strip()
-
-        # Find token from JS
-        token_match = re.search(r"token=['\"]?([a-zA-Z0-9]+)", html)
-        token = token_match.group(1) if token_match else "undefined"
-
-        # Generate random 10 characters as required by Doodstream player
-        rand_chars = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-        expiry = int(time.time() * 1000)
-
-        direct_url = f"{stream_base}{rand_chars}?token={token}&expiry={expiry}"
-        stream_headers = {
-            "User-Agent": headers["User-Agent"],
-            "Referer": base_domain + "/"
-        }
-        if custom_headers:
-            stream_headers.update(custom_headers)
-        logger.info(f"Resolved Doodstream embed URL to direct stream: {direct_url[:50]}...")
-        return direct_url, stream_headers
-    except Exception as e:
-        logger.warning(f"Doodstream resolver exception for {url}: {e}")
-        return None
-
-
-def format_bytes(b: Optional[float]) -> str:
-    if not b or b <= 0:
-        return "0 B"
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if b < 1024.0:
-            return f"{b:.1f} {unit}"
-        b /= 1024.0
-    return f"{b:.1f} PB"
-
-
-def format_eta(seconds: Optional[int]) -> str:
-    if seconds is None or seconds < 0:
-        return "--:--"
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    if h > 0:
-        return f"{h:02d}:{m:02d}:{s:02d}"
-    return f"{m:02d}:{s:02d}"
-
-
-def sanitize_filename(title: str, max_length: int = 150) -> str:
-    if not title:
-        return "video"
-    # Remove Windows illegal characters: < > : " / \ | ? *
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', title)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip('. ')
-    if not cleaned:
-        return "video"
-    return cleaned[:max_length].strip('. ')
-
-
-def is_generic_title(title: Optional[str]) -> bool:
-    if not title:
-        return True
-    t = title.strip().lower()
-    if not t:
-        return True
-    return t in [
-        "master", "index", "manifest", "playlist", "stream",
-        "video", "fetching info...", "undefined", "unknown", "null"
-    ] or t.startswith("index-f") or t.startswith("master-")
-
-
-class DownloadTask:
-    def __init__(
-        self,
-        task_id: str,
-        url: str,
-        title: Optional[str] = None,
-        quality: str = "best",
-        fmt: str = "mp4",
-        headers: Optional[Dict[str, str]] = None,
-        provider_id: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        provider_limit: Optional[int] = None,
-    ):
-        self.id = task_id
-        self.url = url
-        self.title = title or "Fetching info..."
-        self.quality = quality
-        self.format = fmt
-        self.headers = headers or {}
-
-        # Resolve provider
-        referer = self.headers.get("Referer") or self.headers.get("referer")
-        pid, pname, plimit = match_provider(url, referer)
-        self.provider_id = provider_id or pid
-        self.provider_name = provider_name or pname
-        self.provider_limit = provider_limit or plimit
-        
-        self.status = "queued"  # queued, downloading, processing, completed, failed, cancelled
-        self.progress = 0.0  # 0.0 to 100.0
-        self.speed = "0 B/s"
-        self.speed_raw = 0
-        self.downloaded_bytes = 0
-        self.total_bytes = 0
-        self.eta = "--:--"
-        self.error_message: Optional[str] = None
-        self.filepath: Optional[str] = None
-        self.filename: Optional[str] = None
-        self.thumbnail: Optional[str] = None
-
-        self.created_at = time.time()
-        self.started_at: Optional[float] = None
-        self.completed_at: Optional[float] = None
-        self.cancel_requested = False
-        self.tracked_files: Set[str] = set()
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "url": self.url,
-            "title": self.title,
-            "quality": self.quality,
-            "format": self.format,
-            "provider": self.provider_name,
-            "provider_id": self.provider_id,
-            "provider_limit": self.provider_limit,
-            "status": self.status,
-            "progress": self.progress,
-            "speed": self.speed,
-            "speed_raw": self.speed_raw,
-            "downloaded_bytes": self.downloaded_bytes,
-            "downloaded_str": format_bytes(self.downloaded_bytes),
-            "total_bytes": self.total_bytes,
-            "total_str": format_bytes(self.total_bytes) if self.total_bytes > 0 else "Unknown",
-            "eta": self.eta,
-            "error_message": self.error_message,
-            "filename": self.filename,
-            "filepath": self.filepath,
-            "thumbnail": self.thumbnail,
-            "created_at": self.created_at,
-            "started_at": self.started_at,
-            "completed_at": self.completed_at,
-        }
-
-
-def release_file_handles(download_dir: str, task_filepaths: Optional[Iterable[str]] = None) -> int:
-    """
-    Scans for open Python file streams (io.IOBase) within download_dir or matching
-    tracked task filepaths, closes them, and forces cyclic garbage collection.
-    This prevents Windows from locking files with [WinError 32] after cancellation.
-    """
-    closed_count = 0
-    target_dir = os.path.abspath(download_dir).lower()
-    targets = set()
-    if task_filepaths:
-        for p in task_filepaths:
-            if p:
-                targets.add(os.path.abspath(p).lower())
-
-    for obj in gc.get_objects():
-        try:
-            if isinstance(obj, io.IOBase) and not obj.closed:
-                name = getattr(obj, "name", None)
-                if name and isinstance(name, str):
-                    abs_name = os.path.abspath(name).lower()
-                    if abs_name.startswith(target_dir) or any(abs_name.startswith(t) for t in targets):
-                        try:
-                            obj.close()
-                            closed_count += 1
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-
-    gc.collect()
-    return closed_count
-
-
-def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0.1) -> bool:
-    """
-    Attempts to remove a file, retrying briefly if temporarily locked by Windows filesystem.
-    """
-    for attempt in range(max_retries):
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                logger.info(f"Removed temporary file: {filepath}")
-            return True
-        except (OSError, PermissionError) as e:
-            if attempt < max_retries - 1:
-                time.sleep(delay)
-                release_file_handles(os.path.dirname(filepath), [filepath])
-            else:
-                logger.warning(f"Could not remove file {filepath}: {e}")
-                return False
-    return True
-
-
-def cleanup_task_files(task: DownloadTask, download_dir: Optional[str] = None) -> List[str]:
-    """
-    Identifies and removes all incomplete, temporary, and fragment files for a cancelled task.
-    Handles *.part, *.ytdl, *.part-Frag*.part, format-specific intermediate files, and incomplete output files.
-    """
-    if not download_dir:
-        settings = load_settings()
-        download_dir = settings.get("download_dir")
-
-    if not download_dir or not os.path.exists(download_dir):
-        return []
-
-    # Ensure any open Python file streams are closed and garbage collected first
-    all_tracked = set(task.tracked_files)
-    if task.filepath:
-        all_tracked.add(os.path.abspath(task.filepath))
-    release_file_handles(download_dir, all_tracked)
-
-    target_filename = task.filename or (os.path.basename(task.filepath) if task.filepath else None)
-    clean_title = sanitize_filename(task.title) if (task.title and not is_generic_title(task.title)) else None
-    task_started_at = task.started_at or task.created_at
-
-    deleted = []
-    try:
-        entries = os.listdir(download_dir)
-    except Exception as e:
-        logger.error(f"Failed to list download directory {download_dir}: {e}")
-        return []
-
-    for fn in entries:
-        fp = os.path.join(download_dir, fn)
-        if not os.path.isfile(fp):
-            continue
-
-        should_remove = False
-        fp_abs = os.path.abspath(fp).lower()
-
-        # Check if explicitly tracked
-        for tracked in all_tracked:
-            t_lower = tracked.lower()
-            if fp_abs == t_lower or fp_abs.startswith(t_lower + ".") or fp_abs.startswith(t_lower + "-"):
-                should_remove = True
-                break
-
-        # If not already matched, match via filename / title patterns
-        if not should_remove:
-            try:
-                mtime = os.path.getmtime(fp)
-            except OSError:
-                mtime = 0
-
-            fn_lower = fn.lower()
-            is_temp_or_part = any(ext in fn_lower for ext in [".part", ".ytdl", ".temp"])
-
-            # 1. Exact match with target_filename (incomplete output file modified during task)
-            if target_filename and fn_lower == target_filename.lower():
-                if mtime >= (task_started_at - 2):
-                    should_remove = True
-
-            # 2. Starts with target_filename (e.g. video.mp4.part, video.mp4.ytdl, video.mp4.part-Frag29.part)
-            elif target_filename and (fn_lower.startswith(target_filename.lower() + ".") or fn_lower.startswith(target_filename.lower() + "-")):
-                should_remove = True
-
-            # 3. Base matching (e.g. video.f137.mp4, video.f137.mp4.part, video.f140.m4a.part)
-            elif target_filename:
-                base, _ = os.path.splitext(target_filename)
-                if base and fn_lower.startswith(base.lower() + "."):
-                    if is_temp_or_part or re.search(r"\.f[a-zA-Z0-9_-]+\.", fn_lower) or mtime >= (task_started_at - 2):
-                        should_remove = True
-
-            # 4. Clean title matching if target_filename wasn't resolved yet
-            if not should_remove and clean_title:
-                ct_lower = clean_title.lower()
-                if fn_lower.startswith(ct_lower + "."):
-                    if is_temp_or_part or re.search(r"\.f[a-zA-Z0-9_-]+\.", fn_lower) or mtime >= (task_started_at - 2):
-                        should_remove = True
-
-        if should_remove:
-            if remove_file_with_retry(fp):
-                deleted.append(fp)
-
-    gc.collect()
-    if deleted:
-        logger.info(f"Task {task.id} cleanup deleted {len(deleted)} file(s): {[os.path.basename(f) for f in deleted]}")
-    return deleted
-
-
 class DownloadManager:
+    """
+    Manages the queue, concurrency limits, and thread dispatching for downloads.
+    Operates as a thread-safe singleton.
+    """
     _instance = None
 
     def __init__(self):
@@ -354,7 +37,7 @@ class DownloadManager:
         self.task_order: List[str] = []
         self._active_threads: Dict[str, threading.Thread] = {}
         self._stop_dispatcher = False
-        
+
         # Start background queue dispatcher
         self._dispatcher_thread = threading.Thread(target=self._dispatcher_loop, daemon=True)
         self._dispatcher_thread.start()
@@ -402,7 +85,7 @@ class DownloadManager:
                 return False
             if task.status in ["completed", "failed", "cancelled"]:
                 return False
-            
+
             task.cancel_requested = True
             if task.status == "queued":
                 task.status = "cancelled"
@@ -410,7 +93,7 @@ class DownloadManager:
                 logger.info(f"Queued task {task_id} cancelled.")
                 cleanup_task_files(task)
                 return True
-            
+
             # If currently downloading, the hook will raise exception and terminate
             task.status = "cancelled"
             logger.info(f"Cancellation requested for active task {task_id}.")
@@ -515,212 +198,22 @@ class DownloadManager:
                                 break
 
     def _execute_download(self, task: DownloadTask):
-        settings = load_settings()
-        download_dir = settings.get("download_dir")
-        os.makedirs(download_dir, exist_ok=True)
+        """Executes download delegating to engine, resolving Doodstream embeds if present."""
+        execute_download(task, doodstream_resolver=resolve_doodstream)
 
-        task.status = "downloading"
-        task.started_at = time.time()
-        logger.info(f"Starting download for task {task.id}: {task.url}")
 
-        download_url = task.url
-        download_headers = dict(task.headers)
-
-        # Automatic Doodstream resolution if an embed/page link was passed
-        if is_doodstream_url(download_url) and "/pass_md5/" not in download_url and "?" not in download_url:
-            resolved = resolve_doodstream(download_url, download_headers)
-            if resolved:
-                download_url, extra_headers = resolved
-                download_headers.update(extra_headers)
-
-        def progress_hook(d):
-            if task.cancel_requested:
-                raise Exception("Download cancelled by user.")
-
-            status = d.get("status")
-            fn = d.get("filename")
-            tmpfn = d.get("tmpfilename")
-            if fn:
-                task.tracked_files.add(os.path.abspath(fn))
-                if not task.filename:
-                    task.filepath = os.path.abspath(fn)
-                    task.filename = os.path.basename(fn)
-            if tmpfn:
-                task.tracked_files.add(os.path.abspath(tmpfn))
-
-            if status == "downloading":
-                task.status = "downloading"
-                downloaded = d.get("downloaded_bytes") or 0
-                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                speed = d.get("speed") or 0
-                eta = d.get("eta")
-
-                # Handle HLS fragments progress if byte count isn't available
-                frag_index = d.get("fragment_index")
-                frag_count = d.get("fragment_count")
-
-                if total > 0:
-                    task.progress = round((downloaded / total) * 100, 1)
-                    task.total_bytes = total
-                elif frag_count and frag_count > 0:
-                    task.progress = round((frag_index / frag_count) * 100, 1)
-                elif "_percent_str" in d:
-                    try:
-                        clean_str = re.sub(r'[^\d.]', '', d["_percent_str"])
-                        task.progress = float(clean_str)
-                    except Exception:
-                        pass
-
-                task.downloaded_bytes = downloaded
-                task.speed_raw = speed
-                task.speed = f"{format_bytes(speed)}/s" if speed else "Calculating..."
-                task.eta = format_eta(eta)
-
-            elif status == "finished":
-                task.status = "processing"
-                task.progress = 100.0
-                task.speed = "Finalizing..."
-                task.eta = "00:00"
-                if fn:
-                    task.filepath = os.path.abspath(fn)
-                    task.filename = os.path.basename(fn)
-
-        def postprocessor_hook(d):
-            if task.cancel_requested:
-                raise Exception("Download cancelled by user.")
-            fn = d.get("filepath")
-            if fn:
-                task.tracked_files.add(os.path.abspath(fn))
-                if d.get("status") == "finished":
-                    task.filepath = os.path.abspath(fn)
-                    task.filename = os.path.basename(fn)
-
-        # Determine clean output title
-        clean_base = None
-        if task.title and not is_generic_title(task.title):
-            clean_base = sanitize_filename(task.title)
-
-        if clean_base:
-            out_template = os.path.join(download_dir, f"{clean_base}.%(ext)s")
-        else:
-            out_template = os.path.join(download_dir, "%(title).150s.%(ext)s")
-
-        ydl_opts = {
-            "outtmpl": out_template,
-            "progress_hooks": [progress_hook],
-            "postprocessor_hooks": [postprocessor_hook],
-            "quiet": True,
-            "no_warnings": True,
-            "windowsfilenames": True,
-            "restrictfilenames": False,
-            "nocheckcertificate": True,
-            "overwrites": True,
-        }
-
-        # Format / Quality configuration
-        q = task.quality.lower()
-        target_fmt = task.format.lower()
-
-        if q == "audio":
-            ydl_opts["format"] = "bestaudio/best"
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }]
-        elif q == "1080p":
-            ydl_opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
-            if target_fmt in ["mp4", "mkv"]:
-                ydl_opts["merge_output_format"] = target_fmt
-        elif q == "720p":
-            ydl_opts["format"] = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
-            if target_fmt in ["mp4", "mkv"]:
-                ydl_opts["merge_output_format"] = target_fmt
-        elif q == "480p":
-            ydl_opts["format"] = "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
-            if target_fmt in ["mp4", "mkv"]:
-                ydl_opts["merge_output_format"] = target_fmt
-        else:  # "best"
-            ydl_opts["format"] = "bestvideo*+bestaudio/best"
-            if target_fmt in ["mp4", "mkv"]:
-                ydl_opts["merge_output_format"] = target_fmt
-
-        # Pass custom HTTP headers (e.g. Referer, User-Agent) if provided
-        if download_headers:
-            ydl_opts["http_headers"] = download_headers
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # First extract info (without re-downloading if we can fetch title/thumbnail)
-                try:
-                    info = ydl.extract_info(download_url, download=False)
-                    if info:
-                        extracted = info.get("title")
-                        if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
-                            task.title = extracted
-                        task.thumbnail = info.get("thumbnail") or task.thumbnail
-                        # Track planned filename if available
-                        try:
-                            planned_fn = ydl.prepare_filename(info)
-                            if planned_fn:
-                                task.tracked_files.add(os.path.abspath(planned_fn))
-                                if not task.filepath:
-                                    task.filepath = os.path.abspath(planned_fn)
-                                    task.filename = os.path.basename(planned_fn)
-                        except Exception:
-                            pass
-                except Exception as extract_err:
-                    logger.debug(f"Pre-extraction info non-fatal warning: {extract_err}")
-
-                if task.cancel_requested:
-                    raise Exception("Download cancelled by user.")
-
-                # Perform actual download
-                info = ydl.extract_info(download_url, download=True)
-                if info:
-                    extracted = info.get("title")
-                    if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
-                        task.title = extracted
-                    task.thumbnail = info.get("thumbnail") or task.thumbnail
-                    
-                    # Track files from info dict
-                    if "_filename" in info:
-                        task.tracked_files.add(os.path.abspath(info["_filename"]))
-                    if "requested_downloads" in info:
-                        for req in info["requested_downloads"]:
-                            if "_filename" in req:
-                                task.tracked_files.add(os.path.abspath(req["_filename"]))
-
-                    # Determine final output file if not already detected
-                    if not task.filepath and "_filename" in info:
-                        task.filepath = os.path.abspath(info["_filename"])
-                        task.filename = os.path.basename(info["_filename"])
-                    elif not task.filepath and "requested_downloads" in info:
-                        req = info["requested_downloads"][0]
-                        if "_filename" in req:
-                            task.filepath = os.path.abspath(req["_filename"])
-                            task.filename = os.path.basename(req["_filename"])
-
-            if is_generic_title(task.title):
-                task.title = task.filename or f"Video {time.strftime('%Y-%m-%d %H:%M')}"
-
-            task.status = "completed"
-            task.progress = 100.0
-            task.completed_at = time.time()
-            task.speed = "0 B/s"
-            task.eta = "00:00"
-            logger.info(f"Task {task.id} completed successfully: {task.filename}")
-
-        except Exception as e:
-            is_cancelled = task.cancel_requested or "cancelled by user" in str(e).lower()
-            if is_cancelled:
-                task.status = "cancelled"
-                logger.info(f"Task {task.id} was cancelled. Cleaning up temporary files...")
-                cleanup_task_files(task, download_dir)
-            else:
-                task.status = "failed"
-                task.error_message = str(e)
-                logger.error(f"Task {task.id} failed: {e}")
-            task.completed_at = time.time()
-            del e
-            gc.collect()
+__all__ = [
+    "DownloadManager",
+    "DownloadTask",
+    "format_bytes",
+    "format_eta",
+    "sanitize_filename",
+    "is_generic_title",
+    "is_doodstream_url",
+    "resolve_doodstream",
+    "release_file_handles",
+    "remove_file_with_retry",
+    "cleanup_task_files",
+    "build_ydl_options",
+    "execute_download",
+]

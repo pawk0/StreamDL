@@ -139,8 +139,13 @@ video_dl/
 │
 ├── server/                     # Local Flask Server
 │   ├── app.py                  # REST API & static routes
-│   ├── config.py               # Settings loader & path manager
-│   ├── downloader.py           # Thread-safe queue & yt-dlp engine
+│   ├── config.py               # Settings loader & provider matcher
+│   ├── downloader.py           # Thread-safe queue dispatcher & public facade
+│   ├── engine.py               # yt-dlp option configuration & execution engine
+│   ├── task.py                 # DownloadTask model & progress state
+│   ├── cleanup.py              # Windows handle release & temp file cleanup
+│   ├── resolvers.py            # Video host resolvers (e.g. Doodstream)
+│   ├── utils.py                # Pure formatting & filename sanitation utils
 │   ├── static/
 │   │   ├── css/style.css       # Modern dark glassmorphic dashboard CSS
 │   │   └── js/app.js           # Real-time polling & UI controller
