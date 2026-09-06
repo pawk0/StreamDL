@@ -8,12 +8,15 @@
     registeredUrls.add(url);
 
     try {
-      chrome.runtime.sendMessage({
+      const sendPromise = chrome.runtime.sendMessage({
         action: "REGISTER_DOM_MEDIA",
         url: url,
         referer: window.location.href,
         title: document.title || ""
-      }).catch(() => {});
+      });
+      if (sendPromise && typeof sendPromise.catch === "function") {
+        sendPromise.catch(() => {});
+      }
     } catch (e) {}
   }
 

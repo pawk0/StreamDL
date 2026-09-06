@@ -96,9 +96,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Get active tab info
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tabs && tabs.length > 0) {
-    activeTab = tabs[0];
+  if (typeof browser !== "undefined" && browser.tabs && browser.tabs.query) {
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    if (tabs && tabs.length > 0) activeTab = tabs[0];
+  } else if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.query) {
+    const tabs = await new Promise((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (res) => resolve(res || []));
+    });
+    if (tabs && tabs.length > 0) activeTab = tabs[0];
+  }
+
+  if (activeTab) {
     pageTitle.textContent = activeTab.title || "Active Tab";
     pageTitle.title = activeTab.title || "";
     pageUrl.textContent = activeTab.url || "";

@@ -3,6 +3,15 @@
   "name": "StreamDL - Video Downloader Companion",
   "version": "1.0.0",
   "description": "Detects video streams (.m3u8, .mpd, video files) and queues downloads to your local yt-dlp server.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "streamdl@local",
+      "strict_min_version": "109.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
   "permissions": [
     "webRequest",
     "storage",
@@ -17,7 +26,8 @@
     "http://127.0.0.1:7921/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["utils.js", "background.js"]
   },
   "action": {
     "default_popup": "popup/popup.html",

@@ -51,6 +51,16 @@ def test_manifest_service_worker_exists():
     assert 'importScripts("utils.js")' in sw_content
 
 
+def test_manifest_firefox_compatibility():
+    data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    gecko = data.get("browser_specific_settings", {}).get("gecko", {})
+    assert gecko.get("id"), "Firefox MV3 requires gecko.id in browser_specific_settings"
+    assert gecko.get("data_collection_permissions", {}).get("required") == ["none"]
+    scripts = data.get("background", {}).get("scripts", [])
+    assert "background.js" in scripts
+    assert "utils.js" in scripts
+
+
 def test_manifest_action_and_popup_exists():
     data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     popup_rel = data.get("action", {}).get("default_popup")

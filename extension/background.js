@@ -1,5 +1,7 @@
-// StreamDL Extension Service Worker
-importScripts("utils.js");
+// StreamDL Extension Service Worker / Background Script
+if (typeof importScripts === "function") {
+  importScripts("utils.js");
+}
 
 const streamsByTab = new Map();
 
@@ -70,7 +72,7 @@ function registerStream(tabId, url, typeHint = "", contentType = "", referer = "
   updateBadge(tabId, tabStreams.length);
 }
 
-// 1. Intercept all requests marked by Chrome as media type (catches Doodstream, HTML5 players, MSE)
+// 1. Intercept all requests marked as media type (catches Doodstream, HTML5 players, MSE)
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
@@ -79,7 +81,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       details.url,
       details.type,
       "",
-      details.initiator || details.documentUrl || ""
+      details.initiator || details.originUrl || details.documentUrl || ""
     );
   },
   {
@@ -97,7 +99,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       details.url,
       details.type,
       "",
-      details.initiator || details.documentUrl || ""
+      details.initiator || details.originUrl || details.documentUrl || ""
     );
   },
   {
@@ -142,7 +144,7 @@ chrome.webRequest.onHeadersReceived.addListener(
         details.url,
         details.type,
         contentType,
-        details.initiator || details.documentUrl || ""
+        details.initiator || details.originUrl || details.documentUrl || ""
       );
     }
   },
@@ -154,6 +156,16 @@ chrome.webRequest.onHeadersReceived.addListener(
 );
 
 // 4. Intercept request headers to capture Referer, Origin, User-Agent, Cookie for streams
+const sendHeadersOptions = ["requestHeaders"];
+if (
+  typeof chrome !== "undefined" &&
+  chrome.webRequest &&
+  chrome.webRequest.OnBeforeSendHeadersOptions &&
+  chrome.webRequest.OnBeforeSendHeadersOptions.hasOwnProperty("EXTRA_HEADERS")
+) {
+  sendHeadersOptions.push("extraHeaders");
+}
+
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
     if (details.tabId < 0 || !details.url) return;
@@ -176,16 +188,18 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
   {
     urls: ["<all_urls>"]
   },
-  ["requestHeaders", "extraHeaders"]
+  sendHeadersOptions
 );
 
 // Update badge count on extension icon
 function updateBadge(tabId, count) {
+  const actionApi = (typeof chrome !== "undefined" && chrome.action) || (typeof browser !== "undefined" && browser.action);
+  if (!actionApi) return;
   if (count > 0) {
-    chrome.action.setBadgeText({ tabId, text: String(count) });
-    chrome.action.setBadgeBackgroundColor({ tabId, color: "#6366f1" });
+    actionApi.setBadgeText({ tabId, text: String(count) });
+    actionApi.setBadgeBackgroundColor({ tabId, color: "#6366f1" });
   } else {
-    chrome.action.setBadgeText({ tabId, text: "" });
+    actionApi.setBadgeText({ tabId, text: "" });
   }
 }
 
