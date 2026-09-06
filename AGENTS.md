@@ -3,7 +3,11 @@
 ## Python Environment & Tooling
 - Always execute Python tools and linters through the project virtual environment on Windows:
   - Linter: `.\.venv\Scripts\python.exe -m ruff check <path>`
+  - Type Checker: `.\.venv\Scripts\python.exe -m pyrefly check`
   - Tests: `.\.venv\Scripts\python.exe -m pytest`
+- **Post-Change Verification**: Always run both `pyrefly` and `ruff` checks after making changes to ensure there are no type errors or linting violations:
+  - `.\.venv\Scripts\python.exe -m pyrefly check`
+  - `.\.venv\Scripts\python.exe -m ruff check <path>` (or `.\.venv\Scripts\python.exe -m ruff check .`)
 - **Safeguard Verification**: Whenever applying automated linting or formatting fixes (`ruff check --fix`), immediately run the test suite to ensure that auto-fixes have not introduced regressions or removed necessary side-effect imports.
 
 ## Code & Typing Standards
@@ -11,6 +15,7 @@
   - PEP 585 (Python 3.9+) built-in generics: `list[T]`, `dict[K, V]`, `set[T]`, `tuple[...]` instead of `typing.List`, `typing.Dict`, etc.
   - PEP 604 (Python 3.10+) union types: `T | None` and `TypeA | TypeB` instead of `typing.Optional[T]` or `typing.Union`.
   - Import callables from `collections.abc import Callable`.
+- **Suppression Explanations**: Any type checker or linter suppressions (`pyrefly: ignore` or ruff `noqa`) must include a short explanation justifying why the suppression is necessary (e.g. `# pyrefly: ignore [bad-assignment] - dynamic monkey-patch`).
 - **String Prefix & Suffix Checking**: Pass tuples to `str.startswith(...)` and `str.endswith(...)` (e.g. `s.startswith(("index-f", "master-"))`) instead of chaining multiple `or` expressions.
 - **Exception Handling**: Avoid bare `except Exception: pass` where possible; log non-fatal warnings or narrow exceptions unless explicitly building fallback/resilience handlers.
 
