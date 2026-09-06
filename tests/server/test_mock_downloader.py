@@ -385,7 +385,7 @@ def test_mock_ytdlp_doodstream_resolution_integration(manager, monkeypatch):
     def mock_resolve(url, headers):
         return ("https://resolved-stream.dood/video.mp4", {"X-Resolved": "1"})
 
-    monkeypatch.setattr("server.engine.resolve_doodstream", mock_resolve)
+    monkeypatch.setattr("server.resolvers.resolve_doodstream", mock_resolve)
 
     task = DownloadTask(task_id="dood_task", url="https://dood.to/e/sampleembed")
     manager._execute_download(task)

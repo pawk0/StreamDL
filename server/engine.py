@@ -12,7 +12,7 @@ import yt_dlp
 from server.cleanup import cleanup_task_files
 from server.config import load_settings
 from server.patches import apply_ytdlp_patches
-from server.resolvers import is_doodstream_url, resolve_doodstream
+from server.resolvers import resolve_url
 from server.task import DownloadTask
 from server.utils import (
     format_bytes,
@@ -138,8 +138,8 @@ class DownloadCancelledError(Exception):
 def execute_download(
     task: DownloadTask,
     download_dir: str | None = None,
-    doodstream_resolver: Callable[..., tuple | None] | None = None,
-):
+    resolver: Callable[[str, dict[str, str] | None], tuple[str, dict[str, str]] | None] | None = None,
+) -> None:
     """
     Executes a single DownloadTask using yt-dlp, handling progress tracking,
     embed resolution, pre-extraction, and cleanup on failure or cancellation.
@@ -176,13 +176,15 @@ def execute_download(
     download_url = task.url
     download_headers = dict(task.headers)
 
-    # Automatic Doodstream resolution if an embed/page link was passed
-    if is_doodstream_url(download_url) and "/pass_md5/" not in download_url and "?" not in download_url:
-        resolver = doodstream_resolver or resolve_doodstream
-        resolved = resolver(download_url, download_headers)
+    # Automatic stream resolution via resolver registry (or explicit resolver)
+    resolution_fn = resolver or resolve_url
+    try:
+        resolved = resolution_fn(download_url, download_headers)
         if resolved:
             download_url, extra_headers = resolved
             download_headers.update(extra_headers)
+    except Exception as resolve_err:  # noqa: BLE001 - non-fatal resolver failure falls back to original URL
+        logger.warning(f"Stream resolution non-fatal warning for task {task.id} ({task.url}): {resolve_err}")
 
     def progress_hook(d):
         if task.cancel_requested:
