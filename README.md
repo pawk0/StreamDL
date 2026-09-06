@@ -52,7 +52,7 @@ A modern, robust personal media archiving solution that captures video streams d
 ## Getting Started
 
 ### Prerequisites
-- **Python 3.10+** (Python 3.13 is verified and supported)
+- **Python 3.10+** (Python 3.13 and 3.14 are verified and supported)
 - **ffmpeg** (Used for merging video and audio streams into a single MP4)
 
 ---
@@ -82,14 +82,21 @@ We provide automated 1-click Windows batch scripts:
 
 ### Step 2: Install the Browser Extension
 
-Works with Google Chrome, Microsoft Edge, Brave, Opera, and any Chromium-based browser.
+StreamDL supports **Google Chrome, Microsoft Edge, Brave, Opera**, and **Mozilla Firefox**.
 
+#### For Chromium Browsers (Chrome, Edge, Brave, Opera):
 1. Open your browser and go to `chrome://extensions` (or `edge://extensions`).
 2. Enable **Developer mode** using the toggle switch in the top-right corner.
 3. Click **Load unpacked** in the top-left corner.
 4. Select the `extension` folder inside this project directory:
    `c:\Users\Pawel\Desktop\projects\video_dl\extension`
 5. Pin the **StreamDL** icon to your browser toolbar.
+
+#### For Mozilla Firefox:
+1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on...**.
+3. In the file dialog, navigate to `c:\Users\Pawel\Desktop\projects\video_dl\extension` and select `manifest.json`.
+4. Pin the **StreamDL** icon to your browser toolbar.
 
 ---
 
@@ -154,18 +161,70 @@ video_dl/
 │   └── templates/
 │       └── index.html          # Dashboard HTML template
 │
-├── extension/                  # Chrome/Chromium Browser Extension
-│   ├── manifest.json           # Manifest V3 configuration
+├── extension/                  # Cross-Browser WebExtension (Chrome, Edge, Firefox, Brave)
+│   ├── manifest.json           # Manifest V3 configuration (dual Chromium + Firefox MV3)
 │   ├── background.js           # Network request sniffer & queue client
 │   ├── content.js              # DOM media scanner
+│   ├── utils.js                # Shared stream analysis, header derivation & storage utils
 │   ├── icons/                  # 16px, 48px, 128px icons
 │   └── popup/
 │       ├── popup.html          # Extension popup UI
 │       ├── popup.css           # Modern popup styling
 │       └── popup.js            # Popup controller & server health check
 │
-└── tests/                      # Automated unit & integration tests
-    ├── test_server.py          # API endpoint tests
-    ├── test_concurrency.py     # Concurrency limit & queue dispatcher tests
-    └── test_live_download.py   # Real HLS stream download test
+└── tests/                      # Automated test suite (pytest + Playwright)
+    ├── conftest.py             # Test isolation & environment fixtures
+    ├── fixtures.py             # Shared mock data & test helpers
+    ├── extension/              # Browser extension test suite
+    │   ├── test_manifest.py    # Manifest V3 & cross-browser compatibility tests
+    │   └── test_utils.py       # Extension JS utility & stream analysis tests (Playwright)
+    └── server/                 # Local server unit & integration tests
+        ├── test_server.py      # REST API endpoint tests
+        ├── test_concurrency.py # Concurrency limit & queue dispatcher tests
+        ├── test_duplicate_tasks.py # URL normalization & deduplication tests
+        ├── test_headers.py     # Request header building & origin derivation tests
+        ├── test_mock_downloader.py # Queue state machine & download lifecycle tests
+        ├── test_providers.py   # Domain pattern matching & concurrency tests
+        ├── test_remote_control_php.py # Video host & resolver tests
+        ├── test_cancellation_cleanup.py # Handle release & temp file cleanup tests
+        └── test_live_download.py # Real HLS stream download test (live mark)
 ```
+
+---
+
+## Testing
+
+StreamDL includes a comprehensive test suite covering the local Flask server, concurrency dispatcher, cancellation cleanup, and the browser extension.
+
+Run the test suite using pytest:
+
+```powershell
+# Run all fast unit and integration tests (230+ tests)
+.\.venv\Scripts\python.exe -m pytest
+
+# Run browser extension unit tests (headless Playwright)
+.\.venv\Scripts\python.exe -m pytest tests/extension/
+
+# Run server-side unit tests
+.\.venv\Scripts\python.exe -m pytest tests/server/
+```
+
+---
+
+## Privacy Policy
+
+StreamDL is built with a strict **local-first, privacy-by-design** philosophy:
+
+- **100% Local Execution**: All stream sniffing, format analysis, and video downloads occur entirely on your machine.
+- **Zero Telemetry**: No analytics, tracking beacons, error reports, or telemetry data are collected or sent to any remote server.
+- **Direct Connection Only**: The browser extension communicates strictly with your local Python server at `http://localhost:7921`. Stream downloads are fetched directly by `yt-dlp` from the media provider's CDN—no intermediary proxy or cloud relay is ever used.
+- **Minimal Permissions**: Extension permissions (`webRequest`, `storage`, `activeTab`, `contextMenus`, `notifications`) are used exclusively for core functionality on your local computer.
+
+For complete details, see the full [Privacy Policy](PRIVACY.md).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
