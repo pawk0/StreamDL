@@ -59,5 +59,11 @@
   ],
   "default_quality": "best",
   "default_format": "mkv",
-  "port": 7921
+  "port": 7921,
+  "allowed_origins": [
+    "^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$",
+    "^chrome-extension://.*",
+    "^moz-extension://.*",
+    "^extension://.*"
+  ]
 }

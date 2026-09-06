@@ -94,6 +94,7 @@ function initApp() {
 
   // Fetch Queue & Update UI
   async function fetchQueue() {
+    window.__testFetchQueue = fetchQueue;
     if (isFetching) return;
     isFetching = true;
     try {
@@ -164,20 +165,36 @@ function initApp() {
   function renderTasks(tasks) {
     if (!tasks.length) {
       emptyState.style.display = 'block';
-      tasksContainer.innerHTML = '';
-      tasksContainer.appendChild(emptyState);
+      const existingCards = tasksContainer.querySelectorAll('.task-item');
+      existingCards.forEach(card => card.remove());
+      if (!tasksContainer.contains(emptyState)) {
+        tasksContainer.appendChild(emptyState);
+      }
       return;
     }
 
     emptyState.style.display = 'none';
-    tasksContainer.innerHTML = '';
+
+    const currentTaskIds = new Set(tasks.map(t => String(t.id)));
+
+    // Remove cards that are no longer in the task list
+    const existingCards = tasksContainer.querySelectorAll('.task-item');
+    existingCards.forEach(card => {
+      if (!currentTaskIds.has(card.dataset.id)) {
+        card.remove();
+      }
+    });
 
     let queuePositionCounter = 1;
 
     tasks.forEach(task => {
-      const card = document.createElement('div');
-      card.className = 'task-item';
-      card.dataset.id = task.id;
+      const taskId = String(task.id);
+      let card = tasksContainer.querySelector(`.task-item[data-id="${taskId}"]`);
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'task-item';
+        card.dataset.id = taskId;
+      }
 
       // Status badge and styling
       let statusBadgeClass = `badge-${escapeHtml(task.status)}`;
@@ -248,7 +265,9 @@ function initApp() {
         ? `<button type="button" class="btn-map-provider" data-domain="${escapeHtml(task.provider_id || task.provider)}" title="Map ${escapeHtml(task.provider_id || task.provider)} to a provider" aria-label="Map ${escapeHtml(task.provider_id || task.provider)} to a provider">+</button>`
         : '';
 
-      card.innerHTML = `
+      const progressWidth = task.status === 'completed' ? 100 : (task.progress || 0);
+
+      const cardInnerHtml = `
         <div class="task-top">
           <div class="task-info">
             <div class="task-thumb">${thumbHtml}</div>
@@ -265,7 +284,7 @@ function initApp() {
         </div>
 
         <div class="progress-bar-wrap">
-          <div class="progress-bar-fill ${fillClass}" style="width: ${task.status === 'completed' ? 100 : (task.progress || 0)}%;"></div>
+          <div class="progress-bar-fill ${fillClass}" style="width: ${progressWidth}%;"></div>
         </div>
 
         <div class="task-bottom">
@@ -275,48 +294,55 @@ function initApp() {
         ${errorHtml}
       `;
 
+      if (card._lastHtml !== cardInnerHtml) {
+        card.innerHTML = cardInnerHtml;
+        card._lastHtml = cardInnerHtml;
+      }
+
       tasksContainer.appendChild(card);
     });
-
-    // Attach event listeners to card action buttons
-    document.querySelectorAll('.btn-cancel').forEach(btn => {
-      btn.onclick = async () => {
-        const id = btn.dataset.id;
-        try {
-          const res = await fetch(`/api/cancel/${id}`, { method: 'POST' });
-          const json = await res.json();
-          if (json.success) {
-            showToast('Download cancelled', 'info');
-            fetchQueue();
-          }
-        } catch (e) {
-          showToast('Failed to cancel task', 'error');
-        }
-      };
-    });
-
-    document.querySelectorAll('.btn-open-file').forEach(btn => {
-      btn.onclick = async () => {
-        const id = btn.dataset.id;
-        try {
-          const res = await fetch(`/api/open-file/${id}`, { method: 'POST' });
-          const json = await res.json();
-          if (!json.success) {
-            showToast(json.error || 'Could not open file', 'error');
-          }
-        } catch (e) {
-          showToast('Failed to open file', 'error');
-        }
-      };
-    });
-
-    document.querySelectorAll('.btn-map-provider').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        openMapModal(btn.dataset.domain);
-      };
-    });
   }
+
+  // Delegated event listener for task cards (cancel, open file, map provider)
+  tasksContainer.addEventListener('click', async (e) => {
+    const cancelBtn = e.target.closest('.btn-cancel');
+    if (cancelBtn) {
+      const id = cancelBtn.dataset.id;
+      try {
+        const res = await fetch(`/api/cancel/${id}`, { method: 'POST' });
+        const json = await res.json();
+        if (json.success) {
+          showToast('Download cancelled', 'info');
+          fetchQueue();
+        }
+      } catch (err) {
+        showToast('Failed to cancel task', 'error');
+      }
+      return;
+    }
+
+    const openFileBtn = e.target.closest('.btn-open-file');
+    if (openFileBtn) {
+      const id = openFileBtn.dataset.id;
+      try {
+        const res = await fetch(`/api/open-file/${id}`, { method: 'POST' });
+        const json = await res.json();
+        if (!json.success) {
+          showToast(json.error || 'Could not open file', 'error');
+        }
+      } catch (err) {
+        showToast('Failed to open file', 'error');
+      }
+      return;
+    }
+
+    const mapBtn = e.target.closest('.btn-map-provider');
+    if (mapBtn) {
+      e.stopPropagation();
+      openMapModal(mapBtn.dataset.domain);
+      return;
+    }
+  });
 
   // Add Download Form
   formDownload.addEventListener('submit', async (e) => {

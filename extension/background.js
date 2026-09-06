@@ -277,20 +277,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Send download command to local Flask server
 async function sendDownloadRequest({ url, title, referer, headers: customHeaders, provider, quality = "best", format = "mp4" }) {
   const serverUrl = await getServerUrl();
-  try {
-    const headers = { ...(customHeaders || {}) };
-    if (referer && !headers["Referer"] && !headers["referer"]) {
-      headers["Referer"] = referer;
+  const headers = { ...(customHeaders || {}) };
+  if (referer && !headers["Referer"] && !headers["referer"]) {
+    headers["Referer"] = referer;
+  }
+  const refVal = headers["Referer"] || headers["referer"];
+  if (refVal && !headers["Origin"] && !headers["origin"]) {
+    const derivedOrigin = deriveOriginFromReferer(refVal);
+    if (derivedOrigin) {
+      headers["Origin"] = derivedOrigin;
     }
-    const refVal = headers["Referer"] || headers["referer"];
-    if (refVal && !headers["Origin"] && !headers["origin"]) {
-      const derivedOrigin = deriveOriginFromReferer(refVal);
-      if (derivedOrigin) {
-        headers["Origin"] = derivedOrigin;
-      }
-    }
+  }
 
-    const res = await fetch(`${serverUrl}/api/download`, {
+  let res;
+  try {
+    res = await fetch(`${serverUrl}/api/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -302,17 +303,27 @@ async function sendDownloadRequest({ url, title, referer, headers: customHeaders
         provider
       })
     });
-
-    if (!res.ok) {
-      throw new Error(`Server returned status ${res.status}`);
-    }
-
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    console.error("Failed to connect to local server:", err);
+  } catch (netErr) {
+    console.error("Failed to connect to local server:", netErr);
     throw new Error(
       `Local server is offline or unreachable at ${serverUrl}. Make sure run_server.bat is running.`
     );
   }
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (jsonErr) {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const serverErrMsg = data && (data.error || data.message);
+    if (serverErrMsg) {
+      throw new Error(serverErrMsg);
+    }
+    throw new Error(`Server returned status ${res.status}`);
+  }
+
+  return data;
 }
