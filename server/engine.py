@@ -14,7 +14,13 @@ from server.config import load_settings
 from server.patches import apply_ytdlp_patches
 from server.resolvers import is_doodstream_url, resolve_doodstream
 from server.task import DownloadTask
-from server.utils import format_bytes, format_eta, get_unique_base, is_generic_title, sanitize_filename
+from server.utils import (
+    format_bytes,
+    format_eta,
+    get_unique_base,
+    is_generic_title,
+    sanitize_filename,
+)
 
 logger = logging.getLogger("video_dl.engine")
 
@@ -116,13 +122,17 @@ def build_ydl_options(
             parsed_ref = urllib.parse.urlparse(referer_val)
             if parsed_ref.scheme and parsed_ref.netloc:
                 headers["Origin"] = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"Failed to derive Origin from Referer {referer_val}: {e}")
 
     ydl_opts["http_headers"] = headers
     ydl_opts["concurrent_fragment_downloads"] = 1
 
     return ydl_opts
+
+
+class DownloadCancelledError(Exception):
+    """Raised when a download task is cancelled by user."""
 
 
 def execute_download(
@@ -176,7 +186,7 @@ def execute_download(
 
     def progress_hook(d):
         if task.cancel_requested:
-            raise Exception("Download cancelled by user.")
+            raise DownloadCancelledError("Download cancelled by user.")
 
         status = d.get("status")
         fn = d.get("filename")
@@ -209,8 +219,8 @@ def execute_download(
                 try:
                     clean_str = re.sub(r'[^\d.]', '', d["_percent_str"])
                     task.progress = float(clean_str)
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Failed to parse percent string {d.get('_percent_str')}: {e}")
 
             task.downloaded_bytes = downloaded
             task.speed_raw = speed
@@ -228,7 +238,7 @@ def execute_download(
 
     def postprocessor_hook(d):
         if task.cancel_requested:
-            raise Exception("Download cancelled by user.")
+            raise DownloadCancelledError("Download cancelled by user.")
         fn = d.get("filepath")
         if fn:
             task.tracked_files.add(os.path.abspath(fn))
@@ -273,13 +283,13 @@ def execute_download(
                             if not task.filepath:
                                 task.filepath = os.path.abspath(planned_fn)
                                 task.filename = os.path.basename(planned_fn)
-                    except Exception:
-                        pass
-            except Exception as extract_err:
+                    except (KeyError, ValueError, TypeError, AttributeError, OSError) as plan_err:
+                        logger.debug(f"Planned filename estimation non-fatal warning: {plan_err}")
+            except Exception as extract_err:  # noqa: BLE001 - non-fatal pre-extraction failure should not abort download
                 logger.debug(f"Pre-extraction info non-fatal warning: {extract_err}")
 
             if task.cancel_requested:
-                raise Exception("Download cancelled by user.")
+                raise DownloadCancelledError("Download cancelled by user.")
 
             # Perform actual download
             info = ydl.extract_info(download_url, download=True)
@@ -317,8 +327,8 @@ def execute_download(
         task.eta = "00:00"
         logger.info(f"Task {task.id} completed successfully: {task.filename}")
 
-    except Exception as e:
-        is_cancelled = task.cancel_requested or "cancelled by user" in str(e).lower()
+    except Exception as e:  # noqa: BLE001 - top-level thread boundary catches all errors to prevent hung tasks
+        is_cancelled = task.cancel_requested or isinstance(e, DownloadCancelledError) or "cancelled by user" in str(e).lower()
         if is_cancelled:
             task.status = "cancelled"
             logger.info(f"Task {task.id} was cancelled. Cleaning up temporary files...")

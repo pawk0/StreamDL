@@ -136,7 +136,7 @@ def open_folder():
             else:
                 subprocess.Popen(["xdg-open", d])
             return jsonify({"success": True, "path": d})
-        except Exception as e:
+        except OSError as e:
             return jsonify({"success": False, "error": str(e)}), 500
     return jsonify({"success": False, "error": "Folder does not exist"}), 404
 
@@ -155,7 +155,7 @@ def open_file(task_id: str):
             else:
                 subprocess.Popen(["xdg-open", fp])
             return jsonify({"success": True, "file": fp})
-        except Exception as e:
+        except OSError as e:
             return jsonify({"success": False, "error": str(e)}), 500
     return jsonify({"success": False, "error": f"File does not exist: {fp}"}), 404
 

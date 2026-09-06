@@ -1,9 +1,12 @@
 import fnmatch
 import json
+import logging
 import os
 import re
 import urllib.parse
 from pathlib import Path
+
+logger = logging.getLogger("video_dl.config")
 
 
 def get_settings_file() -> Path:
@@ -57,7 +60,7 @@ def load_settings() -> dict:
             with open(settings_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 settings.update(data)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading settings: {e}")
 
     # Environment port override
@@ -76,8 +79,8 @@ def load_settings() -> dict:
     # Ensure download directory exists
     try:
         os.makedirs(settings["download_dir"], exist_ok=True)
-    except Exception:
-        pass
+    except OSError as e:
+        logger.warning(f"Could not create download directory {settings.get('download_dir')}: {e}")
     return settings
 
 def save_settings(new_settings: dict) -> dict:
@@ -96,8 +99,8 @@ def save_settings(new_settings: dict) -> dict:
                     continue
                 try:
                     os.makedirs(val, exist_ok=True)
-                except Exception:
-                    pass
+                except OSError as e:
+                    logger.warning(f"Could not create download directory {val}: {e}")
             settings[k] = val
 
     if "providers" in new_settings and isinstance(new_settings["providers"], list):
@@ -139,7 +142,7 @@ def save_settings(new_settings: dict) -> dict:
     try:
         with open(settings_file, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
-    except Exception as e:
+    except OSError as e:
         print(f"Error saving settings: {e}")
 
     return settings
@@ -189,8 +192,8 @@ def match_provider(url: str, referer: str | None = None, settings: dict | None =
                 else:
                     domain = netloc
                 break
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"Failed to parse candidate URL {c}: {e}")
 
     return domain.lower(), domain, default_limit
 

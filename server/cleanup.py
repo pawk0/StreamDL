@@ -34,7 +34,7 @@ def _is_task_file(candidate_abs: str, targets: set) -> bool:
             return True
 
         # 2. Suffix / fragment match: target.mp4.part, target.mp4.ytdl, target.mp4.part-Frag*.part
-        if cand_fn.startswith(t_fn + ".") or cand_fn.startswith(t_fn + "-"):
+        if cand_fn.startswith((t_fn + ".", t_fn + "-")):
             return True
 
         # 3. Base stream variants (e.g. format streams target.f137.mp4.part or target.temp.mp4)
@@ -84,10 +84,10 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
                         try:
                             obj.close()
                             closed_count += 1
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+                        except (OSError, ValueError) as close_err:
+                            logger.debug(f"Failed to close handle {name}: {close_err}")
+        except (AttributeError, TypeError, ValueError, OSError) as inspect_err:
+            logger.debug(f"Handle inspection skipped object: {inspect_err}")
 
     gc.collect()
     return closed_count
@@ -164,7 +164,7 @@ def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> l
     deleted = []
     try:
         entries = os.listdir(download_dir)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"Failed to list download directory {download_dir}: {e}")
         return []
 
@@ -212,15 +212,21 @@ def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> l
                     r"^" + re.escape(ct_lower) + r"\.(mp4|m4a|webm|mkv|mp3|ogg|wav|aac|flv|ts)(\.(part|ytdl|temp))(-frag\d+\.part)?$",
                     fn_lower
                 ))
-                if is_format_stream or is_title_temp_media or fn_lower.startswith(ct_lower + ".temp.") or fn_lower == (ct_lower + ".temp"):
+                if (
+                    is_format_stream
+                    or is_title_temp_media
+                    or fn_lower.startswith(ct_lower + ".temp.")
+                    or fn_lower == (ct_lower + ".temp")
+                    or (
+                        is_temp_or_part
+                        and mtime >= (task_started_at - 2)
+                        and re.match(r"^" + re.escape(ct_lower) + r"\.[a-zA-Z0-9]{2,5}\.(part|ytdl)", fn_lower)
+                    )
+                ):
                     should_remove = True
-                elif is_temp_or_part and mtime >= (task_started_at - 2):
-                    if re.match(r"^" + re.escape(ct_lower) + r"\.[a-zA-Z0-9]{2,5}\.(part|ytdl)", fn_lower):
-                        should_remove = True
 
-        if should_remove:
-            if remove_file_with_retry(fp):
-                deleted.append(fp)
+        if should_remove and remove_file_with_retry(fp):
+            deleted.append(fp)
 
     gc.collect()
     if deleted:

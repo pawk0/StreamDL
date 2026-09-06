@@ -65,8 +65,8 @@ def apply_ytdlp_patches() -> None:
                         val_ext = orig_determine_ext(val, default_ext=None)
                         if val_ext and val_ext.lower() in yt_dlp.utils.KNOWN_EXTENSIONS:
                             return val_ext
-        except Exception:
-            pass
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.debug(f"Failed to inspect query parameters for extension: {e}")
 
         # Return default_ext (e.g. None so GenericIE falls back to urlhandle_detect_ext / Content-Type)
         return default_ext
@@ -79,8 +79,8 @@ def apply_ytdlp_patches() -> None:
         if mod and hasattr(mod, "determine_ext"):
             try:
                 mod.determine_ext = smart_determine_ext
-            except Exception:
-                pass
+            except (AttributeError, TypeError) as mod_err:
+                logger.debug(f"Could not patch determine_ext on module {getattr(mod, '__name__', mod)}: {mod_err}")
 
 
 # Alias for backwards compatibility

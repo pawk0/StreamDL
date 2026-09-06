@@ -74,7 +74,7 @@ def test_release_file_handles_allows_locked_file_deletion(tmp_path):
     locked_file = os.path.join(download_dir, "stream.mp4.part")
 
     # Open a file and intentionally leave stream open in Python memory
-    f = open(locked_file, "wb")
+    f = open(locked_file, "wb")  # noqa: SIM115 - intentionally kept unclosed to test handle release
     f.write(b"locked fragment data")
     f.flush()
 
@@ -255,7 +255,7 @@ def test_cancellation_does_not_interrupt_concurrent_downloads(tmp_path):
 
     # Task B: concurrent active download with an open file stream
     task_b_part = os.path.join(download_dir, "Concurrent Task B.mp4.part")
-    concurrent_handle = open(task_b_part, "wb")
+    concurrent_handle = open(task_b_part, "wb")  # noqa: SIM115 - intentionally kept open to verify concurrent handle preservation
     concurrent_handle.write(b"initial_data_b")
     concurrent_handle.flush()
 
@@ -322,7 +322,7 @@ def test_cancellation_does_not_affect_files_with_similar_names(tmp_path, cancell
 
     # Create similarly named active file and keep an open file handle
     similar_part = os.path.join(download_dir, f"{similar_name}.part")
-    similar_handle = open(similar_part, "wb")
+    similar_handle = open(similar_part, "wb")  # noqa: SIM115 - intentionally kept open to verify handle preservation
     similar_handle.write(b"active_similar_data")
     similar_handle.flush()
 

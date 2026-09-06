@@ -20,7 +20,7 @@ def is_doodstream_url(url: str) -> bool:
     ])
 
 
-def resolve_doodstream(url: str, custom_headers: dict = None) -> tuple[str, dict] | None:
+def resolve_doodstream(url: str, custom_headers: dict | None = None) -> tuple[str, dict] | None:
     """
     Resolves a Doodstream page/embed URL (e.g. /e/xxx or /d/xxx) into the direct streaming media URL.
     Returns (direct_stream_url, headers_dict) or None if failed.
@@ -74,6 +74,6 @@ def resolve_doodstream(url: str, custom_headers: dict = None) -> tuple[str, dict
             stream_headers.update(custom_headers)
         logger.info(f"Resolved Doodstream embed URL to direct stream: {direct_url[:50]}...")
         return direct_url, stream_headers
-    except Exception as e:
+    except (OSError, ValueError, IndexError, UnicodeDecodeError) as e:
         logger.warning(f"Doodstream resolver exception for {url}: {e}")
         return None

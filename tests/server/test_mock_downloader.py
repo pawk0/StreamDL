@@ -1,4 +1,5 @@
 import os
+from typing import ClassVar
 
 import pytest
 
@@ -23,8 +24,8 @@ class MockYoutubeDL:
         MockYoutubeDL.last_instance = self
         MockYoutubeDL.all_instances.append(self)
 
-    all_instances = []
-    last_instance = None
+    all_instances: ClassVar[list] = []
+    last_instance: ClassVar[object | None] = None
 
     def __enter__(self):
         return self
@@ -34,7 +35,7 @@ class MockYoutubeDL:
 
     def extract_info(self, url, download=True):
         if getattr(self, "simulate_error", None):
-            raise Exception(self.simulate_error)
+            raise RuntimeError(self.simulate_error)
 
         # Execute progress hooks
         progress_hooks = self.opts.get("progress_hooks", [])
@@ -199,7 +200,7 @@ def test_resolve_doodstream_success(monkeypatch):
 
 def test_resolve_doodstream_failure(monkeypatch):
     def mock_urlopen_fail(req, timeout=12):
-        raise Exception("Network error")
+        raise OSError("Network error")
 
     monkeypatch.setattr("urllib.request.urlopen", mock_urlopen_fail)
     assert resolve_doodstream("https://dood.to/e/abcd") is None
@@ -324,7 +325,7 @@ def test_mock_ytdlp_hls_fragments_progress(manager, monkeypatch):
 def test_mock_ytdlp_download_error(manager, monkeypatch):
     class FailingMockYDL(MockYoutubeDL):
         def extract_info(self, url, download=True):
-            raise Exception("HTTP Error 404: Not Found")
+            raise RuntimeError("HTTP Error 404: Not Found")
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", FailingMockYDL)
 
