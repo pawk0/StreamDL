@@ -4,7 +4,7 @@ import subprocess
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
-from server.config import load_settings, save_settings
+from server.config import DEFAULT_ALLOWED_ORIGIN_PATTERNS, load_settings, save_settings
 from server.downloader import DownloadManager, DuplicateTaskError
 
 app = Flask(
@@ -13,8 +13,14 @@ app = Flask(
     static_folder="static",
     static_url_path="/static"
 )
-# Enable CORS for all routes (necessary for browser extensions and local clients)
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable restricted CORS for local clients and browser extensions
+CORS(app, resources={r"/*": {"origins": DEFAULT_ALLOWED_ORIGIN_PATTERNS}})
+
+SAFE_MEDIA_EXTENSIONS = frozenset([
+    "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "m4v", "ts", "m2ts", "mpg", "mpeg",
+    "mp3", "m4a", "flac", "wav", "aac", "ogg", "opus", "wma", "mka",
+    "srt", "vtt", "ass", "ssa"
+])
 
 manager = DownloadManager.get_instance()
 
@@ -129,16 +135,40 @@ def manage_settings():
 def open_folder():
     settings = load_settings()
     d = settings.get("download_dir")
-    if isinstance(d, str) and os.path.exists(d):
+    if not d or not isinstance(d, str):
+        return jsonify({"success": False, "error": "Download directory not configured"}), 400
+
+    base_dir = os.path.realpath(d)
+    norm_base = os.path.normcase(base_dir)
+
+    data = request.get_json(force=True, silent=True) or {}
+    req_folder = data.get("folder")
+    if req_folder and isinstance(req_folder, str) and req_folder.strip():
+        req_folder = req_folder.strip()
+        target_path = os.path.realpath(os.path.join(base_dir, req_folder)) if not os.path.isabs(req_folder) else os.path.realpath(req_folder)
+        norm_target = os.path.normcase(target_path)
         try:
-            if os.name == "nt":
-                os.startfile(d)
-            else:
-                subprocess.Popen(["xdg-open", d])
-            return jsonify({"success": True, "path": d})
-        except OSError as e:
-            return jsonify({"success": False, "error": str(e)}), 500
-    return jsonify({"success": False, "error": "Folder does not exist"}), 404
+            if os.path.commonpath([norm_base, norm_target]) != norm_base:
+                return jsonify({"success": False, "error": "Access denied: path is outside download directory"}), 403
+        except ValueError:
+            return jsonify({"success": False, "error": "Access denied: path is on a different drive"}), 403
+    else:
+        target_path = base_dir
+
+    if not os.path.exists(target_path):
+        return jsonify({"success": False, "error": "Folder does not exist"}), 404
+
+    if not os.path.isdir(target_path):
+        return jsonify({"success": False, "error": "Target path is not a directory"}), 400
+
+    try:
+        if os.name == "nt":
+            os.startfile(target_path)
+        else:
+            subprocess.Popen(["xdg-open", target_path])
+        return jsonify({"success": True, "path": target_path})
+    except OSError as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/open-file/<task_id>", methods=["POST"])
@@ -146,18 +176,40 @@ def open_file(task_id: str):
     task = manager.get_task(task_id)
     if not task or not task.get("filepath"):
         return jsonify({"success": False, "error": "Filepath not recorded for this task"}), 404
-    
-    fp = task["filepath"]
-    if os.path.exists(fp):
-        try:
-            if os.name == "nt":
-                os.startfile(fp)
-            else:
-                subprocess.Popen(["xdg-open", fp])
-            return jsonify({"success": True, "file": fp})
-        except OSError as e:
-            return jsonify({"success": False, "error": str(e)}), 500
-    return jsonify({"success": False, "error": f"File does not exist: {fp}"}), 404
+
+    settings = load_settings()
+    download_dir = settings.get("download_dir")
+    if not download_dir or not isinstance(download_dir, str):
+        return jsonify({"success": False, "error": "Download directory not configured"}), 400
+
+    fp = str(task["filepath"])
+    norm_base = os.path.normcase(os.path.realpath(download_dir))
+    norm_fp = os.path.normcase(os.path.realpath(fp))
+
+    try:
+        if os.path.commonpath([norm_base, norm_fp]) != norm_base or norm_base == norm_fp:
+            return jsonify({"success": False, "error": "Access denied: file is outside download directory"}), 403
+    except ValueError:
+        return jsonify({"success": False, "error": "Access denied: file is on a different drive"}), 403
+
+    ext = os.path.splitext(norm_fp)[1].lstrip(".").lower()
+    if ext not in SAFE_MEDIA_EXTENSIONS:
+        return jsonify({"success": False, "error": f"Access denied: unsafe file extension '{ext}'"}), 403
+
+    if not os.path.exists(norm_fp):
+        return jsonify({"success": False, "error": f"File does not exist: {fp}"}), 404
+
+    if not os.path.isfile(norm_fp):
+        return jsonify({"success": False, "error": "Target path is not a regular file"}), 400
+
+    try:
+        if os.name == "nt":
+            os.startfile(norm_fp)
+        else:
+            subprocess.Popen(["xdg-open", norm_fp])
+        return jsonify({"success": True, "file": norm_fp})
+    except OSError as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 def run_server(port: int | None = None):

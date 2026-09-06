@@ -39,6 +39,13 @@ DEFAULT_PROVIDERS: list[dict] = [
     }
 ]
 
+DEFAULT_ALLOWED_ORIGIN_PATTERNS: list[str] = [
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    r"^chrome-extension://.*",
+    r"^moz-extension://.*",
+    r"^extension://.*",
+]
+
 DEFAULT_SETTINGS = {
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "max_concurrent": 3,
@@ -47,12 +54,14 @@ DEFAULT_SETTINGS = {
     "default_quality": "best",
     "default_format": "mp4",
     "port": 7921,
+    "allowed_origins": list(DEFAULT_ALLOWED_ORIGIN_PATTERNS),
 }
 
 def load_settings() -> dict:
     settings = dict(DEFAULT_SETTINGS)
     # Deep copy default providers
     settings["providers"] = [dict(p) for p in DEFAULT_PROVIDERS]
+    settings["allowed_origins"] = list(DEFAULT_ALLOWED_ORIGIN_PATTERNS)
     
     settings_file = get_settings_file()
     if settings_file.exists():
@@ -75,6 +84,8 @@ def load_settings() -> dict:
         settings["providers"] = [dict(p) for p in DEFAULT_PROVIDERS]
     if "max_concurrent_per_provider" not in settings:
         settings["max_concurrent_per_provider"] = 1
+    if not settings.get("allowed_origins") or not isinstance(settings.get("allowed_origins"), list):
+        settings["allowed_origins"] = list(DEFAULT_ALLOWED_ORIGIN_PATTERNS)
 
     # Ensure download directory exists
     download_dir = settings.get("download_dir")
@@ -104,6 +115,11 @@ def save_settings(new_settings: dict) -> dict:
                 except OSError as e:
                     logger.warning(f"Could not create download directory {val}: {e}")
             settings[k] = val
+
+    if "allowed_origins" in new_settings and isinstance(new_settings["allowed_origins"], list):
+        cleaned_origins = [str(o).strip() for o in new_settings["allowed_origins"] if str(o).strip()]
+        if cleaned_origins:
+            settings["allowed_origins"] = cleaned_origins
 
     if "providers" in new_settings and isinstance(new_settings["providers"], list):
         cleaned_providers = []

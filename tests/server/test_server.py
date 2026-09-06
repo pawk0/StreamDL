@@ -208,7 +208,7 @@ def test_open_folder_error(client, monkeypatch, tmp_path):
     assert res_err.get_json()["success"] is False
 
 
-def test_open_file_endpoints(client, manager, monkeypatch, tmp_path):
+def test_open_file_endpoints(client, manager, monkeypatch, tmp_path, isolated_env):
     opened = []
     monkeypatch.setattr("os.startfile", lambda p: opened.append(p), raising=False)
     monkeypatch.setattr("subprocess.Popen", lambda args, **kwargs: opened.append(args[1]))
@@ -226,13 +226,13 @@ def test_open_file_endpoints(client, manager, monkeypatch, tmp_path):
 
     # 3. File recorded but missing on disk -> 404
     task_missing = manager.add_task(url="https://example.com/missing")
-    task_missing.filepath = str(tmp_path / "missing_video.mp4")
+    task_missing.filepath = str(isolated_env["download_dir"] / "missing_video.mp4")
     res_missing = client.post(f"/api/open-file/{task_missing.id}")
     assert res_missing.status_code == 404
     assert "File does not exist" in res_missing.get_json()["error"]
 
     # 4. File recorded and exists on disk -> 200
-    real_file = tmp_path / "real_video.mp4"
+    real_file = isolated_env["download_dir"] / "real_video.mp4"
     real_file.write_text("dummy video content")
     task_ok = manager.add_task(url="https://example.com/ok")
     task_ok.filepath = str(real_file)

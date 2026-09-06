@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', () => {
+function initApp() {
   // DOM Elements
   const statActive = document.getElementById('stat-active');
   const statActiveSpeed = document.getElementById('stat-active-speed');
@@ -54,13 +54,27 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentMapDomain = '';
 
   function escapeHtml(str) {
-    if (!str) return '';
+    if (str === null || str === undefined) return '';
     return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  function sanitizeMediaUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    const trimmed = url.trim();
+    try {
+      const parsed = new URL(trimmed, window.location.origin);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'data:') {
+        return escapeHtml(trimmed);
+      }
+    } catch (e) {
+      // Invalid URL scheme
+    }
+    return '';
   }
 
   // Toast notification helper
@@ -166,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.id = task.id;
 
       // Status badge and styling
-      let statusBadgeClass = `badge-${task.status}`;
+      let statusBadgeClass = `badge-${escapeHtml(task.status)}`;
       let statusLabel = task.status;
       if (task.status === 'queued') {
         statusLabel = `Queued #${queuePositionCounter++}`;
@@ -177,8 +191,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Thumbnail / icon
-      const thumbHtml = task.thumbnail
-        ? `<img src="${task.thumbnail}" alt="Thumbnail" onerror="this.style.display='none'">`
+      const safeThumb = sanitizeMediaUrl(task.thumbnail);
+      const thumbHtml = safeThumb
+        ? `<img src="${safeThumb}" alt="Thumbnail" onerror="this.style.display='none'">`
         : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
 
       // Progress bar fill class
@@ -190,14 +205,14 @@ document.addEventListener('DOMContentLoaded', () => {
       let actionButtons = '';
       if (task.status === 'downloading' || task.status === 'queued') {
         actionButtons = `
-          <button class="btn btn-danger btn-sm btn-cancel" data-id="${task.id}" title="Cancel download">
+          <button class="btn btn-danger btn-sm btn-cancel" data-id="${escapeHtml(task.id)}" title="Cancel download">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             <span>Cancel</span>
           </button>
         `;
       } else if (task.status === 'completed') {
         actionButtons = `
-          <button class="btn btn-secondary btn-sm btn-open-file" data-id="${task.id}" title="Open Video File">
+          <button class="btn btn-secondary btn-sm btn-open-file" data-id="${escapeHtml(task.id)}" title="Open Video File">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
             <span>Play</span>
           </button>
@@ -208,21 +223,21 @@ document.addEventListener('DOMContentLoaded', () => {
       let metricsHtml = '';
       if (task.status === 'downloading') {
         metricsHtml = `
-          <span>${task.downloaded_str} / ${task.total_str}</span>
-          <span>⚡ ${task.speed}</span>
-          <span>⏱️ ETA: ${task.eta}</span>
-          <span>${task.progress.toFixed(1)}%</span>
+          <span>${escapeHtml(task.downloaded_str)} / ${escapeHtml(task.total_str)}</span>
+          <span>⚡ ${escapeHtml(task.speed)}</span>
+          <span>⏱️ ETA: ${escapeHtml(task.eta)}</span>
+          <span>${typeof task.progress === 'number' ? task.progress.toFixed(1) : '0.0'}%</span>
         `;
       } else if (task.status === 'queued') {
         metricsHtml = `<span>Waiting in queue for next available slot...</span>`;
       } else if (task.status === 'completed') {
-        metricsHtml = `<span>✅ ${task.filename || 'Downloaded successfully'}</span>`;
+        metricsHtml = `<span>✅ ${escapeHtml(task.filename || 'Downloaded successfully')}</span>`;
       } else if (task.status === 'processing') {
         metricsHtml = `<span>⚡ Finalizing & muxing audio/video...</span>`;
       }
 
       const errorHtml = (task.status === 'failed' && task.error_message)
-        ? `<div class="task-error-text">⚠️ ${task.error_message}</div>`
+        ? `<div class="task-error-text">⚠️ ${escapeHtml(task.error_message)}</div>`
         : '';
 
       // Provider config status & map button
@@ -238,19 +253,19 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="task-info">
             <div class="task-thumb">${thumbHtml}</div>
             <div class="task-details">
-              <div class="task-title" title="${task.title}">${task.title}</div>
-              <div class="task-url" title="${task.url}">${task.url}</div>
+              <div class="task-title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</div>
+              <div class="task-url" title="${escapeHtml(task.url)}">${escapeHtml(task.url)}</div>
             </div>
           </div>
           <div class="task-badges">
             <span class="badge badge-provider" title="Streaming Provider / Host"><span>🌐 ${escapeHtml(task.provider || 'Direct')}</span>${mapBtnHtml}</span>
-            <span class="badge badge-quality">${task.quality.toUpperCase()} • ${task.format.toUpperCase()}</span>
-            <span class="badge ${statusBadgeClass}">${statusLabel}</span>
+            <span class="badge badge-quality">${escapeHtml((task.quality || '').toUpperCase())} • ${escapeHtml((task.format || '').toUpperCase())}</span>
+            <span class="badge ${escapeHtml(statusBadgeClass)}">${escapeHtml(statusLabel)}</span>
           </div>
         </div>
 
         <div class="progress-bar-wrap">
-          <div class="progress-bar-fill ${fillClass}" style="width: ${task.status === 'completed' ? 100 : task.progress}%;"></div>
+          <div class="progress-bar-fill ${fillClass}" style="width: ${task.status === 'completed' ? 100 : (task.progress || 0)}%;"></div>
         </div>
 
         <div class="task-bottom">
@@ -731,4 +746,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Poll loop
   fetchQueue();
   setInterval(fetchQueue, 1000);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
