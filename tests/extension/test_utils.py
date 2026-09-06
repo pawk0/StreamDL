@@ -12,10 +12,15 @@ UTILS_JS = (EXTENSION_DIR / "utils.js").read_text(encoding="utf-8")
 
 @pytest.fixture(scope="module")
 def browser_page():
-    """Launches headless Chromium and injects mock Chrome storage along with utils.js."""
+    """Launches headless Chromium, collects V8 JS coverage, and injects mock Chrome storage."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
+
+        # Start V8 JavaScript coverage via Chrome DevTools Protocol
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Profiler.enable")
+        cdp.send("Profiler.startPreciseCoverage", {"callCount": True, "detailed": True})
 
         # Inject Chrome mock storage environment
         page.evaluate("""
@@ -47,6 +52,21 @@ def browser_page():
         # Evaluate utils.js
         page.evaluate(UTILS_JS)
         yield page
+
+        # Collect and report V8 coverage
+        cov_data = cdp.send("Profiler.takePreciseCoverage")
+        cdp.send("Profiler.stopPreciseCoverage")
+        cdp.send("Profiler.disable")
+
+        for entry in cov_data.get("result", []):
+            funcs = [f for f in entry.get("functions", []) if f.get("functionName")]
+            if any(f["functionName"] == "analyzeStreamUrl" for f in funcs):
+                total = len(funcs)
+                covered = sum(1 for f in funcs if any(r["count"] > 0 for r in f["ranges"]))
+                pct = (covered / total) * 100 if total else 0
+                print(f"\n[Extension JS Coverage] utils.js functions: {covered}/{total} ({pct:.1f}%)")
+                break
+
         browser.close()
 
 
@@ -233,3 +253,34 @@ def test_server_url_storage_configuration(browser_page):
     browser_page.evaluate("() => StreamDLUtils.setServerUrl('http://127.0.0.1:8888/')")
     custom_url = browser_page.evaluate("() => StreamDLUtils.getServerUrl()")
     assert custom_url == "http://127.0.0.1:8888"
+
+
+def test_format_stream_label(browser_page):
+    providers_list = [dict(p) for p in DEFAULT_PROVIDERS]
+
+    master_stream = {
+        "url": "https://cdn-tnmr.org/video/master.m3u8",
+        "isMaster": True,
+        "referer": "https://lulustream.com/e/123",
+    }
+    label1 = browser_page.evaluate(
+        "([s, p]) => StreamDLUtils.formatStreamLabel(s, p)",
+        [master_stream, providers_list],
+    )
+    assert "⭐ [Master]" in label1
+    assert "master.m3u8" in label1
+    assert "LuluStream" in label1
+
+    variant_stream = {
+        "url": "https://example.com/hls/1080p.m3u8",
+        "isMaster": False,
+        "referer": "",
+    }
+    label2 = browser_page.evaluate(
+        "([s, p]) => StreamDLUtils.formatStreamLabel(s, p)",
+        [variant_stream, providers_list],
+    )
+    assert "⭐ [Master]" not in label2
+    assert "1080p.m3u8" in label2
+    assert "example.com" in label2
+
