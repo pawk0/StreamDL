@@ -14,7 +14,7 @@ from server.config import load_settings
 from server.patches import apply_ytdlp_patches
 from server.resolvers import is_doodstream_url, resolve_doodstream
 from server.task import DownloadTask
-from server.utils import format_bytes, format_eta, is_generic_title, sanitize_filename
+from server.utils import format_bytes, format_eta, get_unique_base, is_generic_title, sanitize_filename
 
 logger = logging.getLogger("video_dl.engine")
 
@@ -254,10 +254,21 @@ def execute_download(
                     if extracted and not is_generic_title(extracted) and is_generic_title(task.title):
                         task.title = extracted
                     task.thumbnail = info.get("thumbnail") or task.thumbnail
-                    # Track planned filename if available
+
+                    # Check planned filename and disambiguate if colliding on disk
                     try:
                         planned_fn = ydl.prepare_filename(info)
                         if planned_fn:
+                            planned_stem = os.path.splitext(os.path.basename(planned_fn))[0]
+                            unique_stem = get_unique_base(download_dir, planned_stem)
+                            if unique_stem != planned_stem:
+                                task.title = unique_stem
+                                if "outtmpl" in ydl.params and isinstance(ydl.params["outtmpl"], dict):
+                                    ydl.params["outtmpl"]["default"] = os.path.join(
+                                        download_dir, f"{sanitize_filename(unique_stem)}.%(ext)s"
+                                    )
+                                planned_fn = ydl.prepare_filename(info)
+
                             task.tracked_files.add(os.path.abspath(planned_fn))
                             if not task.filepath:
                                 task.filepath = os.path.abspath(planned_fn)

@@ -36,6 +36,7 @@ def isolated_env(tmp_path, monkeypatch):
         manager.tasks.clear()
         manager.task_order.clear()
         manager._active_threads.clear()
+        manager._reserved_names.clear()
 
     yield {
         "settings_file": test_settings_file,
@@ -48,6 +49,7 @@ def isolated_env(tmp_path, monkeypatch):
         manager.tasks.clear()
         manager.task_order.clear()
         manager._active_threads.clear()
+        manager._reserved_names.clear()
 
 
 @pytest.fixture

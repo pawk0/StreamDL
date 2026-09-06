@@ -5,7 +5,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
 from server.config import load_settings, save_settings
-from server.downloader import DownloadManager
+from server.downloader import DownloadManager, DuplicateTaskError
 
 app = Flask(
     __name__,
@@ -62,15 +62,19 @@ def queue_download():
     if data.get("referer") and not headers.get("Referer") and not headers.get("referer"):
         headers["Referer"] = data["referer"]
     provider_name = data.get("provider")
-
-    task = manager.add_task(
-        url=url,
-        title=title,
-        quality=quality,
-        fmt=fmt,
-        headers=headers,
-        provider_name=provider_name,
-    )
+    try:
+        task = manager.add_task(
+            url=url,
+            title=title,
+            quality=quality,
+            fmt=fmt,
+            headers=headers,
+            provider_name=provider_name,
+        )
+    except DuplicateTaskError as e:
+        return jsonify({"success": False, "error": str(e)}), 409
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
     return jsonify({
         "success": True,
@@ -156,7 +160,7 @@ def open_file(task_id: str):
     return jsonify({"success": False, "error": f"File does not exist: {fp}"}), 404
 
 
-def run_server(port: int = None):
+def run_server(port: int | None = None):
     settings = load_settings()
     if port is None:
         port = settings.get("port", 7921)

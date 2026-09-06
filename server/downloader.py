@@ -7,9 +7,20 @@ from server.cleanup import cleanup_task_files
 from server.config import load_settings, match_provider
 from server.engine import execute_download
 from server.task import DownloadTask
+from server.utils import (
+    get_unique_base,
+    is_generic_title,
+    normalize_url,
+    sanitize_filename,
+)
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+
+class DuplicateTaskError(ValueError):
+    """Raised when an identical task (same sanitized title and URL) is already queued or downloading."""
+
 
 
 class DownloadManager:
@@ -24,6 +35,7 @@ class DownloadManager:
         self.tasks: dict[str, DownloadTask] = {}
         self.task_order: list[str] = []
         self._active_threads: dict[str, threading.Thread] = {}
+        self._reserved_names: dict[str, str] = {}
         self._stop_dispatcher = False
 
         # Start background queue dispatcher
@@ -47,21 +59,64 @@ class DownloadManager:
         provider_name: str | None = None,
         provider_limit: int | None = None,
     ) -> DownloadTask:
+        norm_url = normalize_url(url)
+        clean_title = sanitize_filename(title) if title else None
+        has_title = bool(clean_title and not is_generic_title(clean_title))
+        clean_title_lower = clean_title.lower() if has_title else None
+
         task_id = str(uuid.uuid4())[:8]
-        task = DownloadTask(
-            task_id=task_id,
-            url=url,
-            title=title,
-            quality=quality,
-            fmt=fmt,
-            headers=headers,
-            provider_id=provider_id,
-            provider_name=provider_name,
-            provider_limit=provider_limit,
-        )
+
         with self._lock:
+            # Prune reservations for tasks that failed or were cancelled
+            dead_ids = [
+                tid for tid, t in self.tasks.items()
+                if t.status in ["failed", "cancelled"] and tid in self._reserved_names
+            ]
+            for tid in dead_ids:
+                del self._reserved_names[tid]
+
+            # Check for duplicate tasks in active states
+            for existing in self.tasks.values():
+                if existing.status in ["queued", "downloading", "processing"]:
+                    ex_clean = sanitize_filename(existing.title) if existing.title else None
+                    ex_has_title = bool(ex_clean and not is_generic_title(ex_clean))
+                    ex_sanitized = ex_clean.lower() if ex_has_title else None
+                    ex_url = normalize_url(existing.url)
+
+                    # Same sanitized name + same url -> reject
+                    if clean_title_lower and ex_sanitized and clean_title_lower == ex_sanitized:
+                        if norm_url == ex_url:
+                            raise DuplicateTaskError(
+                                f"Task with name '{title}' and URL '{url}' is already queued or downloading"
+                            )
+                    elif not clean_title_lower and not ex_sanitized and norm_url == ex_url:
+                        raise DuplicateTaskError(
+                            f"Task for '{url}' is already queued or downloading"
+                        )
+
+            # Compute unique title and register reservation under lock
+            final_title = title
+            if has_title:
+                settings = load_settings()
+                download_dir = settings.get("download_dir")
+                reserved_set = set(self._reserved_names.values())
+                final_title = get_unique_base(download_dir, title, reserved_names=reserved_set)
+                self._reserved_names[task_id] = sanitize_filename(final_title).lower()
+
+            task = DownloadTask(
+                task_id=task_id,
+                url=url,
+                title=final_title,
+                quality=quality,
+                fmt=fmt,
+                headers=headers,
+                provider_id=provider_id,
+                provider_name=provider_name,
+                provider_limit=provider_limit,
+            )
             self.tasks[task_id] = task
             self.task_order.append(task_id)
+
         logger.info(f"Task {task_id} [{task.provider_name}] added to queue for {url}")
         return task
 
@@ -78,12 +133,14 @@ class DownloadManager:
             if task.status == "queued":
                 task.status = "cancelled"
                 task.completed_at = time.time()
+                self._reserved_names.pop(task_id, None)
                 logger.info(f"Queued task {task_id} cancelled.")
                 cleanup_task_files(task)
                 return True
 
             # If currently downloading, the hook will raise exception and terminate
             task.status = "cancelled"
+            self._reserved_names.pop(task_id, None)
             logger.info(f"Cancellation requested for active task {task_id}.")
             th = self._active_threads.get(task_id)
 
@@ -106,6 +163,7 @@ class DownloadManager:
                 if t.status == "cancelled":
                     cleanup_task_files(t)
                 del self.tasks[tid]
+                self._reserved_names.pop(tid, None)
                 if tid in self.task_order:
                     self.task_order.remove(tid)
         logger.info(f"Cleared {len(to_remove)} finished tasks.")
@@ -158,7 +216,7 @@ class DownloadManager:
 
                 # Calculate active count per provider
                 provider_counts: dict[str, int] = {}
-                for tid in self._active_threads.keys():
+                for tid in self._active_threads:
                     t = self.tasks.get(tid)
                     if t:
                         provider_counts[t.provider_id] = provider_counts.get(t.provider_id, 0) + 1
@@ -197,4 +255,9 @@ class DownloadManager:
 
     def _execute_download(self, task: DownloadTask):
         """Executes download delegating directly to the engine."""
-        execute_download(task)
+        try:
+            execute_download(task)
+        finally:
+            if task.status in ["failed", "cancelled"]:
+                with self._lock:
+                    self._reserved_names.pop(task.id, None)
