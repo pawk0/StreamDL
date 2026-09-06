@@ -14,7 +14,7 @@ def format_bytes(b: float | None) -> str:
     return f"{b:.1f} PB"
 
 
-def format_eta(seconds: int | None) -> str:
+def format_eta(seconds: float | None) -> str:
     """Formats remaining seconds into mm:ss or hh:mm:ss format."""
     if seconds is None or seconds < 0:
         return "--:--"

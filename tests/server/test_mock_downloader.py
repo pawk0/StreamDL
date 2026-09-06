@@ -1,5 +1,5 @@
 import os
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -24,8 +24,8 @@ class MockYoutubeDL:
         MockYoutubeDL.last_instance = self
         MockYoutubeDL.all_instances.append(self)
 
-    all_instances: ClassVar[list] = []
-    last_instance: ClassVar[object | None] = None
+    all_instances: ClassVar[list["MockYoutubeDL"]] = []
+    last_instance: ClassVar["MockYoutubeDL | None"] = None
 
     def __enter__(self):
         return self
@@ -33,7 +33,7 @@ class MockYoutubeDL:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def extract_info(self, url, download=True):
+    def extract_info(self, url, download=True) -> dict[str, Any]:
         if getattr(self, "simulate_error", None):
             raise RuntimeError(self.simulate_error)
 
@@ -269,6 +269,7 @@ def test_mock_ytdlp_quality_options(manager, monkeypatch, quality, fmt, expected
 
     assert task.status == "completed"
     instance = MockYoutubeDL.last_instance
+    assert instance is not None
     assert expected_format_substr in instance.opts["format"]
     if expected_merge_fmt:
         assert instance.opts.get("merge_output_format") == expected_merge_fmt
@@ -289,6 +290,7 @@ def test_mock_ytdlp_custom_headers(manager, monkeypatch):
     manager._execute_download(task)
 
     instance = MockYoutubeDL.last_instance
+    assert instance is not None
     assert instance.opts["http_headers"]["Referer"] == "https://source.com/"
     assert instance.opts["http_headers"]["User-Agent"] == "CustomUA"
 
@@ -333,6 +335,7 @@ def test_mock_ytdlp_download_error(manager, monkeypatch):
     manager._execute_download(task)
 
     assert task.status == "failed"
+    assert task.error_message is not None
     assert "404" in task.error_message
     assert task.completed_at is not None
 
@@ -372,6 +375,7 @@ def test_mock_ytdlp_requested_downloads_filename_detection(manager, monkeypatch)
 
     assert task.status == "completed"
     assert task.filename == "output_merged.mp4"
+    assert task.filepath is not None
     assert task.filepath.endswith("output_merged.mp4")
 
 
@@ -388,6 +392,7 @@ def test_mock_ytdlp_doodstream_resolution_integration(manager, monkeypatch):
 
     assert task.status == "completed"
     instance = MockYoutubeDL.last_instance
+    assert instance is not None
     assert instance.opts["http_headers"].get("X-Resolved") == "1"
 
 

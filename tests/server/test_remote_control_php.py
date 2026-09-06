@@ -38,17 +38,17 @@ def test_smart_determine_ext_rejects_unsafe_extensions_in_query():
     """Test that unsafe extensions in query params are not returned."""
     # Exe in query param must NOT be treated as valid media extension
     url_exe = "https://evil.example.com/get.php?file=malware.exe"
-    assert yt_dlp.utils.determine_ext(url_exe, default_ext=None) is None
+    assert yt_dlp.utils.determine_ext(url_exe, default_ext=None) is None  # pyrefly: ignore [bad-argument-type] - monkey-patched function accepts default_ext=None
 
     # Php in query param
     url_php = "https://evil.example.com/run.php?file=shell.php"
-    assert yt_dlp.utils.determine_ext(url_php, default_ext=None) is None
+    assert yt_dlp.utils.determine_ext(url_php, default_ext=None) is None  # pyrefly: ignore [bad-argument-type] - monkey-patched function accepts default_ext=None
 
 
 def test_smart_determine_ext_without_query_param():
     """Test that script endpoints without query params return default_ext."""
     url_bare = "https://media.website.abc/remote_control.php?token=xyz"
-    assert yt_dlp.utils.determine_ext(url_bare, default_ext=None) is None
+    assert yt_dlp.utils.determine_ext(url_bare, default_ext=None) is None  # pyrefly: ignore [bad-argument-type] - monkey-patched function accepts default_ext=None
     assert yt_dlp.utils.determine_ext(url_bare, default_ext="unknown_video") == "unknown_video"
 
 

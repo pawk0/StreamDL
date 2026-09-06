@@ -129,7 +129,7 @@ def manage_settings():
 def open_folder():
     settings = load_settings()
     d = settings.get("download_dir")
-    if os.path.exists(d):
+    if isinstance(d, str) and os.path.exists(d):
         try:
             if os.name == "nt":
                 os.startfile(d)

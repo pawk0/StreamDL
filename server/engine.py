@@ -5,7 +5,7 @@ import re
 import time
 import urllib.parse
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import yt_dlp
 
@@ -46,7 +46,7 @@ def build_ydl_options(
     progress_hook: Callable[[dict[str, Any]], None],
     postprocessor_hook: Callable[[dict[str, Any]], None],
     custom_headers: dict[str, str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Builds yt-dlp configuration options based on task quality and target format."""
     clean_base = None
     if task.title and not is_generic_title(task.title):
@@ -157,7 +157,7 @@ def execute_download(
     """
     if not download_dir:
         settings = load_settings()
-        download_dir = settings.get("download_dir")
+        download_dir = str(settings.get("download_dir") or "")
     os.makedirs(download_dir, exist_ok=True)
 
     # Verify cancellation state before transitioning to downloading to prevent
@@ -255,7 +255,7 @@ def execute_download(
     )
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(cast(Any, ydl_opts)) as ydl:
             # First extract info (without re-downloading if we can fetch title/thumbnail)
             try:
                 info = ydl.extract_info(download_url, download=False)
@@ -300,22 +300,28 @@ def execute_download(
                 task.thumbnail = info.get("thumbnail") or task.thumbnail
 
                 # Track files from info dict
-                if "_filename" in info:
-                    task.tracked_files.add(os.path.abspath(info["_filename"]))
-                if "requested_downloads" in info:
-                    for req in info["requested_downloads"]:
-                        if "_filename" in req:
-                            task.tracked_files.add(os.path.abspath(req["_filename"]))
+                main_fn = info.get("_filename")
+                if isinstance(main_fn, str):
+                    task.tracked_files.add(os.path.abspath(main_fn))
+                req_downloads = info.get("requested_downloads")
+                if isinstance(req_downloads, list):
+                    for req in req_downloads:
+                        if isinstance(req, dict):
+                            req_fn = req.get("_filename")
+                            if isinstance(req_fn, str):
+                                task.tracked_files.add(os.path.abspath(req_fn))
 
                 # Determine final output file if not already detected
-                if not task.filepath and "_filename" in info:
-                    task.filepath = os.path.abspath(info["_filename"])
-                    task.filename = os.path.basename(info["_filename"])
-                elif not task.filepath and "requested_downloads" in info:
-                    req = info["requested_downloads"][0]
-                    if "_filename" in req:
-                        task.filepath = os.path.abspath(req["_filename"])
-                        task.filename = os.path.basename(req["_filename"])
+                if not task.filepath and isinstance(main_fn, str):
+                    task.filepath = os.path.abspath(main_fn)
+                    task.filename = os.path.basename(main_fn)
+                elif not task.filepath and isinstance(req_downloads, list) and req_downloads:
+                    req = req_downloads[0]
+                    if isinstance(req, dict):
+                        req_fn = req.get("_filename")
+                        if isinstance(req_fn, str):
+                            task.filepath = os.path.abspath(req_fn)
+                            task.filename = os.path.basename(req_fn)
 
         if is_generic_title(task.title):
             task.title = task.filename or f"Video {time.strftime('%Y-%m-%d %H:%M')}"

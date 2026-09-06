@@ -77,10 +77,12 @@ def load_settings() -> dict:
         settings["max_concurrent_per_provider"] = 1
 
     # Ensure download directory exists
-    try:
-        os.makedirs(settings["download_dir"], exist_ok=True)
-    except OSError as e:
-        logger.warning(f"Could not create download directory {settings.get('download_dir')}: {e}")
+    download_dir = settings.get("download_dir")
+    if isinstance(download_dir, str):
+        try:
+            os.makedirs(download_dir, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not create download directory {download_dir}: {e}")
     return settings
 
 def save_settings(new_settings: dict) -> dict:

@@ -1,6 +1,7 @@
 import logging
 import sys
 import urllib.parse
+from typing import Any
 
 import yt_dlp
 import yt_dlp.utils
@@ -25,10 +26,10 @@ def apply_ytdlp_patches() -> None:
        Maintains full CVE-2024-38519 / GHSA-79w7-vh3h-8g4j security guarantees:
        files are strictly saved as valid media files (e.g. .mp4), never as executable scripts.
     """
-    orig_determine_ext = getattr(yt_dlp.utils, "_orig_determine_ext", None)
+    orig_determine_ext: Any = getattr(yt_dlp.utils, "_orig_determine_ext", None)
     if orig_determine_ext is None:
         orig_determine_ext = yt_dlp.utils.determine_ext
-        yt_dlp.utils._orig_determine_ext = orig_determine_ext
+        yt_dlp.utils._orig_determine_ext = orig_determine_ext  # pyrefly: ignore [missing-attribute] - stashing backup of original function on module
 
     allowed_exts = getattr(
         yt_dlp.utils._utils._UnsafeExtensionError,
@@ -71,14 +72,14 @@ def apply_ytdlp_patches() -> None:
         # Return default_ext (e.g. None so GenericIE falls back to urlhandle_detect_ext / Content-Type)
         return default_ext
 
-    yt_dlp.utils.determine_ext = smart_determine_ext
-    yt_dlp.utils._utils.determine_ext = smart_determine_ext
+    yt_dlp.utils.determine_ext = smart_determine_ext  # pyrefly: ignore [bad-assignment] - patched function returns str | None
+    yt_dlp.utils._utils.determine_ext = smart_determine_ext  # pyrefly: ignore [bad-argument-type, bad-assignment] - dynamic patch
 
     # Update any already-loaded modules that imported determine_ext
     for mod in list(sys.modules.values()):
         if mod and hasattr(mod, "determine_ext"):
             try:
-                mod.determine_ext = smart_determine_ext
+                mod.determine_ext = smart_determine_ext  # pyrefly: ignore [missing-attribute] - dynamically patching already-loaded modules
             except (AttributeError, TypeError) as mod_err:
                 logger.debug(f"Could not patch determine_ext on module {getattr(mod, '__name__', mod)}: {mod_err}")
 

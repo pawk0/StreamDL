@@ -61,8 +61,12 @@ class DownloadManager:
     ) -> DownloadTask:
         norm_url = normalize_url(url)
         clean_title = sanitize_filename(title) if title else None
-        has_title = bool(clean_title and not is_generic_title(clean_title))
-        clean_title_lower = clean_title.lower() if has_title else None
+        clean_title_lower = (
+            clean_title.lower()
+            if clean_title and not is_generic_title(clean_title)
+            else None
+        )
+        has_title = clean_title_lower is not None
 
         task_id = str(uuid.uuid4())[:8]
 
@@ -79,8 +83,11 @@ class DownloadManager:
             for existing in self.tasks.values():
                 if existing.status in ["queued", "downloading", "processing"]:
                     ex_clean = sanitize_filename(existing.title) if existing.title else None
-                    ex_has_title = bool(ex_clean and not is_generic_title(ex_clean))
-                    ex_sanitized = ex_clean.lower() if ex_has_title else None
+                    ex_sanitized = (
+                        ex_clean.lower()
+                        if ex_clean and not is_generic_title(ex_clean)
+                        else None
+                    )
                     ex_url = normalize_url(existing.url)
 
                     # Same sanitized name + same url -> reject
@@ -96,9 +103,9 @@ class DownloadManager:
 
             # Compute unique title and register reservation under lock
             final_title = title
-            if has_title:
+            if has_title and title:
                 settings = load_settings()
-                download_dir = settings.get("download_dir")
+                download_dir = str(settings.get("download_dir", ""))
                 reserved_set = set(self._reserved_names.values())
                 final_title = get_unique_base(download_dir, title, reserved_names=reserved_set)
                 self._reserved_names[task_id] = sanitize_filename(final_title).lower()
