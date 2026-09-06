@@ -1,123 +1,7 @@
 // StreamDL Extension Service Worker
-const SERVER_URL = "http://localhost:7921";
+importScripts("utils.js");
+
 const streamsByTab = new Map();
-
-// Helper to extract base stream directory key (e.g. protocol://host/path/without_filename)
-function getStreamKey(url) {
-  try {
-    const u = new URL(url);
-    const segments = u.pathname.split("/").filter(Boolean);
-    segments.pop(); // remove filename
-    return `${u.origin}/${segments.join("/")}`;
-  } catch (e) {
-    return url.split("?")[0];
-  }
-}
-
-// Helper to determine stream type, master vs variant status
-function analyzeStreamUrl(url, typeHint = "", contentType = "") {
-  const lower = url.toLowerCase();
-  
-  // Exclude segment chunks, transport streams, subtitles, images, styles
-  if (
-    contentType.includes("mp2t") ||
-    lower.includes(".ts") ||
-    lower.includes(".m4s") ||
-    lower.includes(".aac") ||
-    lower.includes("segment-") ||
-    lower.includes("/seg-") ||
-    lower.includes("/fragment") ||
-    lower.endsWith(".jpg") ||
-    lower.endsWith(".png") ||
-    lower.endsWith(".gif") ||
-    lower.endsWith(".svg") ||
-    lower.endsWith(".vtt") ||
-    lower.endsWith(".srt") ||
-    lower.endsWith(".css") ||
-    lower.endsWith(".js")
-  ) {
-    return null;
-  }
-
-  let type = "other";
-  let isMaster = false;
-  let isVariant = false;
-
-  const pathname = url.split("?")[0].toLowerCase();
-  const filename = pathname.split("/").pop() || "";
-
-  // Doodstream detection (dood.re, dood.video, doodstream, etc.)
-  if (
-    lower.includes("dood.video") ||
-    lower.includes("doodstream") ||
-    lower.includes("dood.")
-  ) {
-    type = "Doodstream Video";
-    isMaster = true;
-  } else if (lower.includes("remote_control.php")) {
-    type = "Direct MP4 Stream";
-    isMaster = true;
-  } else if (lower.includes(".m3u8") || contentType.includes("mpegurl")) {
-    type = "HLS (.m3u8)";
-    
-    // Check if this is a variant/child playlist (e.g. index-f2-v1-a1.m3u8, 720p.m3u8, chunklist)
-    if (
-      /[-_][fva]\d+/i.test(filename) ||
-      filename.includes("chunklist") ||
-      filename.includes("rendition") ||
-      filename.includes("tracks-") ||
-      /\b(1080p|720p|480p|360p|240p)\.m3u8/i.test(filename)
-    ) {
-      isVariant = true;
-      isMaster = false;
-    } else if (
-      filename === "master.m3u8" ||
-      filename === "playlist.m3u8" ||
-      filename === "manifest.m3u8" ||
-      filename === "index.m3u8" ||
-      filename === "main.m3u8" ||
-      filename.includes("master") ||
-      filename.includes("manifest")
-    ) {
-      isMaster = true;
-    }
-  } else if (lower.includes(".mpd") || contentType.includes("dash")) {
-    type = "DASH (.mpd)";
-    isMaster = true;
-  } else if (lower.includes(".mp4") || contentType.includes("mp4")) {
-    type = "MP4 Video";
-    isMaster = true;
-  } else if (lower.includes(".webm") || contentType.includes("webm")) {
-    type = "WebM Video";
-    isMaster = true;
-  } else if (typeHint === "media" || contentType.startsWith("video/")) {
-    type = "Direct Media Stream";
-    isMaster = true;
-  } else {
-    return null;
-  }
-
-  return { type, isMaster, isVariant, filename };
-}
-
-function extractHeaders(requestHeaders) {
-  const result = {};
-  if (!Array.isArray(requestHeaders)) return result;
-  for (const h of requestHeaders) {
-    if (!h.name || !h.value) continue;
-    const lower = h.name.toLowerCase();
-    if (lower === "referer") {
-      result["Referer"] = h.value;
-    } else if (lower === "origin") {
-      result["Origin"] = h.value;
-    } else if (lower === "user-agent") {
-      result["User-Agent"] = h.value;
-    } else if (lower === "cookie") {
-      result["Cookie"] = h.value;
-    }
-  }
-  return result;
-}
 
 function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "", headers = {}) {
   if (tabId < 0 || !url || !url.startsWith("http")) return;
@@ -378,6 +262,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Send download command to local Flask server
 async function sendDownloadRequest({ url, title, referer, headers: customHeaders, provider, quality = "best", format = "mp4" }) {
+  const serverUrl = await getServerUrl();
   try {
     const headers = { ...(customHeaders || {}) };
     if (referer && !headers["Referer"] && !headers["referer"]) {
@@ -385,13 +270,13 @@ async function sendDownloadRequest({ url, title, referer, headers: customHeaders
     }
     const refVal = headers["Referer"] || headers["referer"];
     if (refVal && !headers["Origin"] && !headers["origin"]) {
-      try {
-        const refUrl = new URL(refVal);
-        headers["Origin"] = refUrl.origin;
-      } catch (e) {}
+      const derivedOrigin = deriveOriginFromReferer(refVal);
+      if (derivedOrigin) {
+        headers["Origin"] = derivedOrigin;
+      }
     }
 
-    const res = await fetch(`${SERVER_URL}/api/download`, {
+    const res = await fetch(`${serverUrl}/api/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -413,7 +298,7 @@ async function sendDownloadRequest({ url, title, referer, headers: customHeaders
   } catch (err) {
     console.error("Failed to connect to local server:", err);
     throw new Error(
-      "Local server is offline or unreachable at http://localhost:7921. Make sure run_server.bat is running."
+      `Local server is offline or unreachable at ${serverUrl}. Make sure run_server.bat is running.`
     );
   }
 }

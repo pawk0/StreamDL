@@ -10,7 +10,7 @@ from server.cleanup import (
 )
 from server.config import save_settings
 from server.task import DownloadTask
-from tests.test_mock_downloader import MockYoutubeDL
+from tests.server.test_mock_downloader import MockYoutubeDL
 
 
 def test_cleanup_task_files_removes_part_ytdl_and_frag(tmp_path):

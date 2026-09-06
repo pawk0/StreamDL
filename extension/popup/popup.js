@@ -1,12 +1,10 @@
-const SERVER_URL = "http://localhost:7921";
-
 document.addEventListener("DOMContentLoaded", async () => {
   // DOM Elements
   const serverStatus = document.getElementById("server-status");
   const serverStatusText = document.getElementById("server-status-text");
   const pageTitle = document.getElementById("page-title");
   const pageUrl = document.getElementById("page-url");
-  
+
   const streamTypeBadge = document.getElementById("stream-type-badge");
   const streamFilename = document.getElementById("stream-filename");
   const streamProviderBadge = document.getElementById("stream-provider-badge");
@@ -14,14 +12,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnCopyUrl = document.getElementById("btn-copy-url");
   const groupOtherStreams = document.getElementById("group-other-streams");
   const selectStreamChoice = document.getElementById("select-stream-choice");
-  
+
   const inputVideoTitle = document.getElementById("input-video-title");
   const selectQuality = document.getElementById("select-quality");
   const selectFormat = document.getElementById("select-format");
   const btnDownloadStream = document.getElementById("btn-download-stream");
   const btnDownloadStreamLabel = document.getElementById("btn-download-stream-label");
   const btnDownloadPage = document.getElementById("btn-download-page");
-  
+
   const messageBanner = document.getElementById("message-banner");
   const linkDashboard = document.getElementById("link-dashboard");
 
@@ -40,37 +38,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       }
     });
-  }
-
-  function matchPattern(pattern, text) {
-    let p = pattern.trim().toLowerCase();
-    if (!p) return false;
-    if (!p.includes("*")) {
-      p = `*${p}*`;
-    }
-    const regexStr = "^" + p.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$";
-    return new RegExp(regexStr, "i").test(text);
-  }
-
-  function detectProvider(url, referer = "") {
-    const candidates = [url, referer].filter(Boolean);
-    for (const p of configuredProviders) {
-      const patterns = Array.isArray(p.patterns) ? p.patterns : [];
-      for (const pattern of patterns) {
-        for (const candidate of candidates) {
-          if (matchPattern(pattern, candidate)) {
-            return p.name || p.id;
-          }
-        }
-      }
-    }
-    try {
-      const u = new URL(url);
-      const parts = u.hostname.split(".");
-      return parts.length >= 2 ? parts.slice(-2).join(".") : u.hostname;
-    } catch (e) {
-      return "";
-    }
   }
 
   // Banner display helper
@@ -92,39 +59,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  function extractFilename(url) {
-    try {
-      const u = new URL(url);
-      const parts = u.pathname.split("/").filter(Boolean);
-      return parts.pop() || "stream";
-    } catch (e) {
-      return url.split("?")[0].split("/").pop() || "stream";
-    }
-  }
-
-  function formatStreamLabel(stream) {
-    try {
-      const u = new URL(stream.url);
-      const fn = extractFilename(stream.url);
-      const provider = detectProvider(stream.url, stream.referer);
-      const prefix = stream.isMaster ? "⭐ [Master] " : "";
-      return `${prefix}${fn} (${provider || u.hostname})`;
-    } catch (e) {
-      return stream.url.substring(0, 45) + "...";
-    }
-  }
-
   // Check Server Health & Load Settings
   async function checkServer() {
+    const serverUrl = await getServerUrl();
     try {
-      const res = await fetch(`${SERVER_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
+      const res = await fetch(`${serverUrl}/api/status`, { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
         const data = await res.json();
         serverStatus.className = "server-status online";
         serverStatusText.textContent = `Online (${data.active_count} active)`;
 
         try {
-          const sRes = await fetch(`${SERVER_URL}/api/settings`, { signal: AbortSignal.timeout(2000) });
+          const sRes = await fetch(`${serverUrl}/api/settings`, { signal: AbortSignal.timeout(2000) });
           if (sRes.ok) {
             const sData = await sRes.json();
             if (sData?.settings?.providers && Array.isArray(sData.settings.providers)) {
@@ -159,13 +105,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     pageUrl.title = activeTab.url || "";
 
     if (activeTab.title && inputVideoTitle) {
-      let cleanTitle = activeTab.title.trim();
-      // Remove trailing site suffixes like " - SiteName", " | SiteName"
-      cleanTitle = cleanTitle.replace(/\s*[-–—|]\s*([^|–—-]+)$/i, (match, suffix) => {
-        if (suffix.includes(".") || suffix.length < 25) return "";
-        return match;
-      }).trim();
-      inputVideoTitle.value = cleanTitle || activeTab.title;
+      inputVideoTitle.value = cleanVideoTitle(activeTab.title);
     }
   }
 
@@ -201,7 +141,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentStreamUrl = stream.url;
       streamTypeBadge.textContent = stream.isMaster ? "⭐ Master Playlist" : stream.type;
       streamFilename.textContent = extractFilename(stream.url);
-      const provider = detectProvider(stream.url, stream.referer);
+      const provider = detectProvider(stream.url, stream.referer, configuredProviders);
       if (provider && streamProviderBadge) {
         streamProviderBadge.textContent = provider;
         streamProviderBadge.style.display = "inline-block";
@@ -220,7 +160,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       streams.forEach((s) => {
         const opt = document.createElement("option");
         opt.value = s.url;
-        opt.textContent = formatStreamLabel(s);
+        opt.textContent = formatStreamLabel(s, configuredProviders);
         opt.title = s.url;
         selectStreamChoice.appendChild(opt);
       });
@@ -269,10 +209,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       const refForOrigin = capturedHeaders["Referer"] || capturedHeaders["referer"];
       if (refForOrigin && !capturedHeaders["Origin"] && !capturedHeaders["origin"]) {
-        try {
-          const refUrl = new URL(refForOrigin);
-          capturedHeaders["Origin"] = refUrl.origin;
-        } catch (e) {}
+        const derivedOrigin = deriveOriginFromReferer(refForOrigin);
+        if (derivedOrigin) {
+          capturedHeaders["Origin"] = derivedOrigin;
+        }
       }
 
       const payload = {
@@ -280,7 +220,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         title: chosenTitle,
         referer: streamReferer,
         headers: capturedHeaders,
-        provider: detectProvider(currentStreamUrl, streamReferer),
+        provider: detectProvider(currentStreamUrl, streamReferer, configuredProviders),
         quality: selectQuality.value,
         format: selectFormat.value,
       };
@@ -317,9 +257,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const headers = {};
       if (activeTab.url) {
         headers["Referer"] = activeTab.url;
-        try {
-          headers["Origin"] = new URL(activeTab.url).origin;
-        } catch (e) {}
+        const derivedOrigin = deriveOriginFromReferer(activeTab.url);
+        if (derivedOrigin) {
+          headers["Origin"] = derivedOrigin;
+        }
       }
       if (typeof navigator !== "undefined" && navigator.userAgent) {
         headers["User-Agent"] = navigator.userAgent;
@@ -330,7 +271,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         title: chosenTitle,
         referer: activeTab.url,
         headers: headers,
-        provider: detectProvider(activeTab.url, activeTab.url),
+        provider: detectProvider(activeTab.url, activeTab.url, configuredProviders),
         quality: selectQuality.value,
         format: selectFormat.value,
       };
@@ -348,8 +289,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Link to Web UI Dashboard
-  linkDashboard.addEventListener("click", (e) => {
+  linkDashboard.addEventListener("click", async (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: SERVER_URL });
+    const serverUrl = await getServerUrl();
+    chrome.tabs.create({ url: serverUrl });
   });
 });
