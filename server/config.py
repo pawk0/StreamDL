@@ -1,5 +1,4 @@
 import copy
-import fnmatch
 import json
 import logging
 import os
@@ -7,6 +6,8 @@ import re
 import threading
 import urllib.parse
 from pathlib import Path
+
+from server.utils import is_domain_or_subdomain
 
 logger = logging.getLogger("video_dl.config")
 
@@ -64,6 +65,8 @@ DEFAULT_ALLOWED_ORIGIN_PATTERNS: list[str] = [
     r"^extension://.*",
 ]
 
+VALID_TLS_MODES: tuple[str, ...] = ("auto", "strict", "permissive")
+
 DEFAULT_SETTINGS = {
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "max_concurrent": 3,
@@ -73,6 +76,7 @@ DEFAULT_SETTINGS = {
     "default_format": "mp4",
     "port": 7921,
     "allowed_origins": list(DEFAULT_ALLOWED_ORIGIN_PATTERNS),
+    "tls_mode": "auto",
 }
 
 
@@ -135,6 +139,15 @@ def load_settings(force_reload: bool = False) -> dict:
             except OSError as e:
                 logger.warning(f"Could not create download directory {download_dir}: {e}")
 
+        # Validate tls_mode
+        raw_tls_mode = settings.get("tls_mode")
+        if raw_tls_mode not in VALID_TLS_MODES:
+            raw_tls_verify = settings.get("tls_verify")
+            if isinstance(raw_tls_verify, bool):
+                settings["tls_mode"] = "auto" if raw_tls_verify else "permissive"
+            else:
+                settings["tls_mode"] = "auto"
+
         _cached_settings = copy.deepcopy(settings)
         _cached_path = settings_file
         _cached_mtime = file_mtime
@@ -169,6 +182,17 @@ def save_settings(new_settings: dict) -> dict:
             cleaned_origins = [str(o).strip() for o in new_settings["allowed_origins"] if str(o).strip()]
             if cleaned_origins:
                 settings["allowed_origins"] = cleaned_origins
+
+        if "tls_mode" in new_settings:
+            mode_val = str(new_settings["tls_mode"]).strip().lower()
+            if mode_val in VALID_TLS_MODES:
+                settings["tls_mode"] = mode_val
+            else:
+                settings["tls_mode"] = "auto"
+        elif "tls_verify" in new_settings:
+            settings["tls_mode"] = "auto" if bool(new_settings["tls_verify"]) else "permissive"
+        elif "check_certificate" in new_settings:
+            settings["tls_mode"] = "auto" if bool(new_settings["check_certificate"]) else "permissive"
 
         if "providers" in new_settings and isinstance(new_settings["providers"], list):
             cleaned_providers = []
@@ -232,7 +256,7 @@ def save_settings(new_settings: dict) -> dict:
 
 def match_provider(url: str, referer: str | None = None, settings: dict | None = None) -> tuple[str, str, int]:
     """
-    Matches a URL and referer against configured providers.
+    Matches a URL and referer against configured providers using exact suffix matching.
     Returns (provider_id, provider_name, provider_concurrency_limit).
     """
     if settings is None:
@@ -243,11 +267,22 @@ def match_provider(url: str, referer: str | None = None, settings: dict | None =
     if providers is None or not isinstance(providers, list):
         providers = DEFAULT_PROVIDERS
 
-    candidates = []
+    candidates: list[str] = []
     if url:
         candidates.append(url)
     if referer:
         candidates.append(referer)
+
+    # Extract hostnames for each candidate
+    candidate_hosts: list[str] = []
+    for c in candidates:
+        try:
+            parsed = urllib.parse.urlparse(c)
+            host = (parsed.hostname or parsed.netloc.split(":")[0]).lower()
+            if host:
+                candidate_hosts.append(host)
+        except (ValueError, AttributeError):
+            pass
 
     for p in providers:
         p_patterns = p.get("patterns", [])
@@ -255,29 +290,30 @@ def match_provider(url: str, referer: str | None = None, settings: dict | None =
             pat = pattern.strip().lower()
             if not pat:
                 continue
-            if "*" not in pat:
-                pat = f"*{pat}*"
-            for c in candidates:
-                c_lower = c.lower()
-                if fnmatch.fnmatch(c_lower, pat):
+
+            core_domain = pat.strip("*").lstrip(".").rstrip(".")
+            for host in candidate_hosts:
+                # 1. Exact domain or subdomain match (e.g. doodstream.com, cloudatacdn.com)
+                if core_domain and is_domain_or_subdomain(host, core_domain):
                     limit = p.get("max_concurrent") or default_limit
                     return p.get("id", "provider"), p.get("name", "Provider"), limit
 
-    # Fallback: extract root domain from URL or referer
+                # 2. Host label matching for non-dotted wildcard patterns (e.g. "*dood*")
+                if core_domain and "." not in core_domain:
+                    host_labels = host.split(".")
+                    if any(label == core_domain or (len(core_domain) >= 3 and label.startswith(core_domain)) for label in host_labels):
+                        limit = p.get("max_concurrent") or default_limit
+                        return p.get("id", "provider"), p.get("name", "Provider"), limit
+
+    # Fallback: extract root domain from candidate hosts
     domain = "Direct"
-    for c in candidates:
-        try:
-            parsed = urllib.parse.urlparse(c)
-            netloc = parsed.netloc.split(":")[0].lower()
-            if netloc:
-                parts = netloc.split(".")
-                if len(parts) >= 2:
-                    domain = ".".join(parts[-2:])
-                else:
-                    domain = netloc
-                break
-        except (ValueError, AttributeError) as e:
-            logger.debug(f"Failed to parse candidate URL {c}: {e}")
+    for host in candidate_hosts:
+        parts = host.split(".")
+        if len(parts) >= 2:
+            domain = ".".join(parts[-2:])
+        else:
+            domain = host
+        break
 
     return domain.lower(), domain, default_limit
 

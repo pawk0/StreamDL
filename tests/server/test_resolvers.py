@@ -11,13 +11,13 @@ from server.resolvers import (
     default_resolver_registry,
     is_doodstream_embed_url,
     is_doodstream_url,
-    is_valid_http_url,
     register_resolver,
     resolve_doodstream,
     resolve_url,
     unregister_resolver,
 )
 from server.task import DownloadTask
+from server.utils import is_valid_http_url
 
 
 @pytest.fixture(autouse=True)

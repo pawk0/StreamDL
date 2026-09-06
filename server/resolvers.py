@@ -1,6 +1,7 @@
 import logging
 import random
 import re
+import ssl
 import string
 import threading
 import time
@@ -8,8 +9,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from typing import Any
 
-from server.config import match_provider
+from server.config import load_settings, match_provider
+from server.utils import is_tls_cert_error, is_valid_http_url
 
 logger = logging.getLogger("video_dl.resolvers")
 
@@ -22,15 +25,57 @@ UrlResolver = Callable[[str, dict[str, str] | None], tuple[str, dict[str, str]] 
 UrlMatcher = Callable[[str], bool]
 
 
-def is_valid_http_url(url: str | None) -> bool:
-    """Validates that a URL is a non-empty string with an http or https scheme and network host."""
-    if not url or not isinstance(url, str):
-        return False
+def open_url_with_tls_policy(
+    req: urllib.request.Request,
+    timeout: int = 12,
+    tls_mode: str | None = None,
+) -> Any:
+    """
+    Opens a urllib Request respecting the configured tls_mode policy:
+      - 'permissive': uses scoped unverified SSL context.
+      - 'auto': tries verified SSL context first; if an SSL certificate verification
+        error occurs on a domain matching a configured provider, logs a loud warning
+        and retries with a scoped unverified SSL context.
+      - 'strict': uses verified SSL context with zero fallback.
+    Never monkeypatches process-wide SSL contexts.
+    """
+    if tls_mode is None:
+        settings = load_settings()
+        tls_mode = str(settings.get("tls_mode", "auto")).lower()
+
+    def _safe_urlopen(r: urllib.request.Request, to: int, ctx: ssl.SSLContext | None) -> Any:
+        try:
+            if ctx is not None:
+                return urllib.request.urlopen(r, timeout=to, context=ctx)
+            return urllib.request.urlopen(r, timeout=to)
+        except TypeError as te:
+            if "context" in str(te):
+                return urllib.request.urlopen(r, timeout=to)
+            raise
+
+    # 1. Permissive mode: scoped unverified context
+    if tls_mode == "permissive":
+        ctx = ssl._create_unverified_context()
+        return _safe_urlopen(req, timeout, ctx)
+
+    # 2. Auto or Strict mode: try verified context first
+    verified_ctx = ssl.create_default_context()
     try:
-        parsed = urllib.parse.urlparse(url)
-        return parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc)
-    except (ValueError, AttributeError):
-        return False
+        return _safe_urlopen(req, timeout, verified_ctx)
+    except (urllib.error.URLError, ssl.SSLError, OSError) as e:
+        if is_tls_cert_error(e) and tls_mode == "auto":
+            req_url = req.full_url if hasattr(req, "full_url") else str(req)
+            settings = load_settings()
+            pid, pname, _ = match_provider(req_url, settings=settings)
+            known_pids = {p.get("id") for p in settings.get("providers", []) if isinstance(p, dict)}
+            if pid in known_pids:
+                logger.warning(
+                    f"TLS certificate verification failed for {req_url} ({e}); "
+                    f"falling back to unverified TLS for matched provider '{pname}' rotating domain."
+                )
+                unverified_ctx = ssl._create_unverified_context()
+                return _safe_urlopen(req, timeout, unverified_ctx)
+        raise
 
 
 def is_doodstream_url(url: str | None, settings: dict | None = None) -> bool:
@@ -66,8 +111,10 @@ def resolve_doodstream(
     try:
         # Convert /d/ (download) to /e/ (embed)
         embed_url = re.sub(r'/(d)/', '/e/', url)
-        domain = urllib.parse.urlparse(embed_url).netloc
-        base_domain = f"https://{domain}"
+        parsed_embed = urllib.parse.urlparse(embed_url)
+        scheme = parsed_embed.scheme.lower() if parsed_embed.scheme else "https"
+        domain = parsed_embed.netloc
+        base_domain = f"{scheme}://{domain}"
 
         # Extract or default User-Agent with case-insensitivity
         user_agent = DEFAULT_RESOLVER_USER_AGENT
@@ -89,7 +136,7 @@ def resolve_doodstream(
         # 1. Fetch embed page HTML
         req = urllib.request.Request(embed_url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with open_url_with_tls_policy(req, timeout=12) as resp:
                 html = resp.read().decode('utf-8', errors='ignore')
         except urllib.error.HTTPError as e:
             logger.warning(f"Doodstream HTTP {e.code} ({e.reason}) fetching embed {embed_url} for {url}")
@@ -121,7 +168,7 @@ def resolve_doodstream(
         # 3. Fetch pass_url to get base stream URL prefix
         pass_req = urllib.request.Request(pass_url, headers=headers)
         try:
-            with urllib.request.urlopen(pass_req, timeout=12) as resp:
+            with open_url_with_tls_policy(pass_req, timeout=12) as resp:
                 stream_base = resp.read().decode('utf-8', errors='ignore').strip()
         except urllib.error.HTTPError as e:
             logger.warning(f"Doodstream HTTP {e.code} ({e.reason}) fetching pass URL {pass_url} for {url}")

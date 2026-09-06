@@ -36,6 +36,7 @@ function initApp() {
   const settingFolder = document.getElementById('setting-folder');
   const settingQuality = document.getElementById('setting-quality');
   const settingFormat = document.getElementById('setting-format');
+  const settingTlsMode = document.getElementById('setting-tls-mode');
 
   // Quick Map Provider Modal Elements
   const modalMapProvider = document.getElementById('modal-map-provider');
@@ -498,6 +499,9 @@ function initApp() {
         settingFolder.value = data.settings.download_dir || '';
         settingQuality.value = data.settings.default_quality || 'best';
         settingFormat.value = data.settings.default_format || 'mp4';
+        if (settingTlsMode) {
+          settingTlsMode.value = data.settings.tls_mode || 'auto';
+        }
 
         renderProviderRows(data.settings.providers || []);
       }
@@ -554,7 +558,8 @@ function initApp() {
       providers: providers,
       download_dir: settingFolder.value.trim(),
       default_quality: settingQuality.value,
-      default_format: settingFormat.value
+      default_format: settingFormat.value,
+      tls_mode: settingTlsMode ? settingTlsMode.value : 'auto'
     };
 
     try {

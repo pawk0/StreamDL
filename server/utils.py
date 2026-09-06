@@ -1,5 +1,7 @@
 import os
 import re
+import ssl
+import urllib.error
 import urllib.parse
 
 
@@ -120,4 +122,49 @@ def get_unique_base(
         if not conflicts(candidate):
             return candidate
         counter += 1
+
+
+def is_valid_http_url(url: str | None) -> bool:
+    """Validates that a URL is a non-empty string with an http or https scheme and network host."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+        return parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc)
+    except (ValueError, AttributeError):
+        return False
+
+
+def is_domain_or_subdomain(hostname: str | None, domain: str) -> bool:
+    """
+    Checks if a hostname exactly matches a domain or is a valid subdomain of it.
+    Prevents suffix injection attacks (e.g. evil-doodstream.com.attacker.net).
+    """
+    if not hostname or not domain:
+        return False
+    h = hostname.lower().strip()
+    d = domain.lower().strip().lstrip(".").rstrip(".")
+    if not h or not d:
+        return False
+    return h == d or h.endswith("." + d)
+
+
+def is_tls_cert_error(err: BaseException | None) -> bool:
+    """Checks whether an exception represents an SSL/TLS certificate verification failure."""
+    if err is None:
+        return False
+    if isinstance(err, ssl.SSLCertVerificationError):
+        return True
+    if isinstance(err, urllib.error.URLError):
+        if isinstance(err.reason, BaseException) and is_tls_cert_error(err.reason):
+            return True
+        reason_str = str(err.reason).lower()
+        if any(msg in reason_str for msg in ("certificate verify failed", "certificate_verify_failed", "self signed", "self-signed", "expired", "ssl: certificate", "hostname mismatch")):
+            return True
+    if isinstance(err, ssl.SSLError):
+        err_str = str(err).lower()
+        if any(msg in err_str for msg in ("certificate verify failed", "certificate_verify_failed", "self signed", "self-signed", "expired", "certificateverifyerror", "certificate")):
+            return True
+    err_str = str(err).lower()
+    return any(msg in err_str for msg in ("certificate verify failed", "certificate_verify_failed", "ssl: certificate", "certificateverifyerror"))
 

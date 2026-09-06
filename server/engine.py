@@ -10,7 +10,7 @@ from typing import Any, cast
 import yt_dlp
 
 from server.cleanup import cleanup_task_files
-from server.config import load_settings
+from server.config import load_settings, match_provider
 from server.patches import apply_ytdlp_patches
 from server.resolvers import resolve_url
 from server.task import DownloadTask
@@ -19,6 +19,7 @@ from server.utils import (
     format_eta,
     get_unique_base,
     is_generic_title,
+    is_tls_cert_error,
     sanitize_filename,
 )
 
@@ -46,8 +47,9 @@ def build_ydl_options(
     progress_hook: Callable[[dict[str, Any]], None],
     postprocessor_hook: Callable[[dict[str, Any]], None],
     custom_headers: dict[str, str] | None = None,
+    tls_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Builds yt-dlp configuration options based on task quality and target format."""
+    """Builds yt-dlp configuration options based on task quality, target format, and TLS policy."""
     clean_base = None
     if task.title and not is_generic_title(task.title):
         clean_base = sanitize_filename(task.title)
@@ -57,6 +59,11 @@ def build_ydl_options(
     else:
         out_template = os.path.join(download_dir, "%(title).150s.%(ext)s")
 
+    if tls_mode is None:
+        settings = load_settings()
+        tls_mode = str(settings.get("tls_mode", "auto")).lower()
+    nocheckcertificate = (tls_mode == "permissive")
+
     ydl_opts: dict[str, Any] = {
         "outtmpl": out_template,
         "progress_hooks": [progress_hook],
@@ -65,7 +72,7 @@ def build_ydl_options(
         "no_warnings": True,
         "windowsfilenames": True,
         "restrictfilenames": False,
-        "nocheckcertificate": True,
+        "nocheckcertificate": nocheckcertificate,
         "overwrites": True,
     }
 
@@ -158,6 +165,9 @@ def execute_download(
     if not download_dir:
         settings = load_settings()
         download_dir = str(settings.get("download_dir") or "")
+    else:
+        settings = load_settings()
+    tls_mode = str(settings.get("tls_mode", "auto")).lower()
     os.makedirs(download_dir, exist_ok=True)
 
     # Verify cancellation state before transitioning to downloading to prevent
@@ -254,10 +264,11 @@ def execute_download(
         progress_hook=progress_hook,
         postprocessor_hook=postprocessor_hook,
         custom_headers=download_headers if download_headers else None,
+        tls_mode=tls_mode,
     )
 
-    try:
-        with yt_dlp.YoutubeDL(cast(Any, ydl_opts)) as ydl:
+    def _run_ydl(opts: dict[str, Any]) -> None:
+        with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
             # First extract info (without re-downloading if we can fetch title/thumbnail)
             try:
                 info = ydl.extract_info(download_url, download=False)
@@ -324,6 +335,41 @@ def execute_download(
                         if isinstance(req_fn, str):
                             task.filepath = os.path.abspath(req_fn)
                             task.filename = os.path.basename(req_fn)
+
+    try:
+        try:
+            _run_ydl(ydl_opts)
+        except Exception as first_err:
+            if task.cancel_requested or isinstance(first_err, DownloadCancelledError):
+                raise
+            if is_tls_cert_error(first_err):
+                if tls_mode == "auto" and not ydl_opts.get("nocheckcertificate"):
+                    pid, pname, _ = match_provider(download_url, referer=download_headers.get("Referer"), settings=settings)
+                    known_pids = {p.get("id") for p in settings.get("providers", []) if isinstance(p, dict)}
+                    is_provider = (pid in known_pids) or (getattr(task, "provider_id", None) in known_pids)
+                    if is_provider:
+                        provider_display = pname if pid in known_pids else getattr(task, "provider_name", "Provider")
+                        logger.warning(
+                            f"TLS certificate verification failed for task {task.id} ({download_url}): {first_err}. "
+                            f"Retrying with TLS verification bypassed for matched provider '{provider_display}' rotating domain."
+                        )
+                        retry_opts = dict(ydl_opts)
+                        retry_opts["nocheckcertificate"] = True
+                        _run_ydl(retry_opts)
+                    else:
+                        raise ValueError(
+                            f"SSL_ERROR: SSL Certificate Verification Failed for {download_url} ({first_err}). "
+                            "suggested_fix: Try Permissive Mode in Settings or add domain to Providers if trusted."
+                        ) from first_err
+                elif tls_mode == "strict":
+                    raise ValueError(
+                        f"SSL_ERROR: SSL Certificate Verification Failed in strict mode for {download_url} ({first_err}). "
+                        "suggested_fix: Try Permissive Mode in Settings or add domain to Providers if trusted."
+                    ) from first_err
+                else:
+                    raise
+            else:
+                raise
 
         if is_generic_title(task.title):
             task.title = task.filename or f"Video {time.strftime('%Y-%m-%d %H:%M')}"
