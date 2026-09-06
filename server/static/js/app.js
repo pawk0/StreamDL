@@ -222,14 +222,14 @@ function initApp() {
       let actionButtons = '';
       if (task.status === 'downloading' || task.status === 'queued') {
         actionButtons = `
-          <button class="btn btn-danger btn-sm btn-cancel" data-id="${escapeHtml(task.id)}" title="Cancel download">
+          <button class="btn btn-danger btn-sm btn-cancel" data-id="${escapeHtml(task.id)}" title="Cancel download" aria-label="Cancel download">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             <span>Cancel</span>
           </button>
         `;
       } else if (task.status === 'completed') {
         actionButtons = `
-          <button class="btn btn-secondary btn-sm btn-open-file" data-id="${escapeHtml(task.id)}" title="Open Video File">
+          <button class="btn btn-secondary btn-sm btn-open-file" data-id="${escapeHtml(task.id)}" title="Open Video File" aria-label="Open Video File">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
             <span>Play</span>
           </button>
@@ -432,7 +432,7 @@ function initApp() {
           </div>
           <div class="provider-field action-field">
             <span class="provider-field-label">&nbsp;</span>
-            <button type="button" class="btn-remove-provider" title="Delete Provider">
+            <button type="button" class="btn-remove-provider" title="Delete Provider" aria-label="Delete Provider">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
           </div>
@@ -467,7 +467,7 @@ function initApp() {
           </div>
           <div class="provider-field action-field">
             <span class="provider-field-label">&nbsp;</span>
-            <button type="button" class="btn-remove-provider" title="Delete Provider">
+            <button type="button" class="btn-remove-provider" title="Delete Provider" aria-label="Delete Provider">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
           </div>

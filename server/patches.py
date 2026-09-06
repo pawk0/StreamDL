@@ -82,7 +82,3 @@ def apply_ytdlp_patches() -> None:
                 mod.determine_ext = smart_determine_ext  # pyrefly: ignore [missing-attribute] - dynamically patching already-loaded modules
             except (AttributeError, TypeError) as mod_err:
                 logger.debug(f"Could not patch determine_ext on module {getattr(mod, '__name__', mod)}: {mod_err}")
-
-
-# Alias for backwards compatibility
-patch_ytdlp_extension_handling = apply_ytdlp_patches

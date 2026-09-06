@@ -1,7 +1,11 @@
+import logging
 import time
+from typing import Any
 
 from server.config import match_provider
 from server.utils import format_bytes
+
+logger = logging.getLogger("video_dl.task")
 
 
 class DownloadTask:
@@ -50,6 +54,33 @@ class DownloadTask:
         self.completed_at: float | None = None
         self.cancel_requested = False
         self.tracked_files: set[str] = set()
+        self.open_streams: set[Any] = set()
+
+    def register_stream(self, stream: Any) -> None:
+        """Register an open file stream or descriptor associated with this download task."""
+        self.open_streams.add(stream)
+
+    def unregister_stream(self, stream: Any) -> None:
+        """Unregister a closed file stream or descriptor."""
+        self.open_streams.discard(stream)
+
+    def close_streams(self) -> int:
+        """Explicitly close all open file streams tracked directly on this task."""
+        closed = 0
+        for stream in list(self.open_streams):
+            try:
+                if hasattr(stream, "closed"):
+                    if not stream.closed:
+                        stream.close()
+                        closed += 1
+                elif hasattr(stream, "close"):
+                    stream.close()
+                    closed += 1
+            except (OSError, ValueError) as err:
+                logger.debug(f"Failed to close tracked stream: {err}")
+            finally:
+                self.open_streams.discard(stream)
+        return closed
 
     def to_dict(self) -> dict:
         return {

@@ -371,6 +371,92 @@ def test_cleanup_with_tracked_files(tmp_path):
     assert p1 in deleted
     assert not os.path.exists(p1)
 
+def test_task_direct_track_and_close_streams(tmp_path):
+    """Verify DownloadTask directly tracks open stream descriptors and closes them."""
+    test_file = str(tmp_path / "stream.part")
+    f = open(test_file, "wb")  # noqa: SIM115
+    f.write(b"test data")
+    f.flush()
+
+    task = DownloadTask("task_stream", "https://example.com/stream")
+    task.register_stream(f)
+    assert f in task.open_streams
+
+    # Closing streams should close the file and empty open_streams
+    closed_count = task.close_streams()
+    assert closed_count == 1
+    assert f.closed
+    assert len(task.open_streams) == 0
+
+    # Calling again on empty set returns 0 safely
+    assert task.close_streams() == 0
+
+
+def test_cleanup_task_files_with_tracked_stream_bypasses_gc_get_objects(tmp_path, monkeypatch):
+    """
+    Verify cleanup_task_files closes task-tracked streams directly without scanning gc.get_objects.
+    """
+    import gc
+
+    download_dir = str(tmp_path)
+    save_settings({"download_dir": download_dir})
+
+    frag_file = os.path.join(download_dir, "Video.mp4.part")
+    f = open(frag_file, "wb")  # noqa: SIM115
+    f.write(b"in-flight data")
+    f.flush()
+
+    task = DownloadTask("t_gc_opt", "https://example.com/gc_opt", title="Video")
+    task.filename = "Video.mp4"
+    task.filepath = os.path.join(download_dir, "Video.mp4")
+    task.status = "cancelled"
+    task.tracked_files.add(frag_file)
+    task.register_stream(f)
+
+    # Monkeypatch gc.get_objects to fail if called
+    def fail_on_gc_get_objects():
+        pytest.fail("gc.get_objects() should NOT be called when task tracks open streams directly!")
+
+    monkeypatch.setattr(gc, "get_objects", fail_on_gc_get_objects)
+
+    deleted = cleanup_task_files(task, download_dir)
+    assert frag_file in deleted
+    assert not os.path.exists(frag_file)
+    assert f.closed
+
+
+def test_remove_file_with_retry_with_task_bypasses_gc_get_objects(tmp_path, monkeypatch):
+    """
+    Verify remove_file_with_retry with task avoids gc.get_objects() during retries.
+    """
+    import gc
+
+    download_dir = str(tmp_path)
+    test_file = os.path.join(download_dir, "locked_retry.part")
+
+    f = open(test_file, "wb")  # noqa: SIM115
+    f.write(b"data")
+    f.flush()
+
+    task = DownloadTask("t_retry", "https://example.com/retry")
+    task.register_stream(f)
+
+    gc_calls = []
+    original_get_objects = gc.get_objects
+
+    def tracked_get_objects():
+        gc_calls.append(1)
+        return original_get_objects()
+
+    monkeypatch.setattr(gc, "get_objects", tracked_get_objects)
+
+    success = remove_file_with_retry(test_file, max_retries=3, delay=0.01, task=task)
+    assert success is True
+    assert not os.path.exists(test_file)
+    assert f.closed
+    assert len(gc_calls) == 0, f"gc.get_objects was called {len(gc_calls)} time(s) during retries!"
+
+
 
 
 

@@ -48,10 +48,15 @@ def _is_task_file(candidate_abs: str, targets: set) -> bool:
     return False
 
 
-def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None = None) -> int:
+def release_file_handles(
+    download_dir: str,
+    task_filepaths: Iterable[str] | None = None,
+    task: DownloadTask | None = None,
+    scan_heap: bool = True,
+) -> int:
     """
-    Scans for open Python file streams (io.IOBase) matching tracked task filepaths,
-    closes them, and forces cyclic garbage collection.
+    Closes open Python file streams matching tracked task filepaths,
+    and forces cyclic garbage collection.
 
     Windows File Lock / Exception Unwinding Rationale:
     When aborting downloads via exceptions in callbacks/hooks (e.g. yt-dlp progress hooks),
@@ -59,11 +64,19 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
     Unhandled exception tracebacks retain frame locals and closures in cyclic memory,
     keeping underlying file handles (io.BufferedWriter / _io.FileIO) open and locking files
     on Windows ([WinError 32]).
-    By scanning gc.get_objects() and matching only files associated with the target task,
-    we explicitly close orphaned streams and invoke gc.collect() to finalize OS descriptors
-    without disturbing active write streams of concurrent downloads in the same directory.
+    Direct Stream Tracking Optimization:
+    If task is provided with directly tracked streams (task.open_streams), they are closed
+    directly. Heap traversal (gc.get_objects()) is only performed if requested/as a fallback,
+    preventing runtime overhead during cancellation retries.
     """
     closed_count = 0
+    if task is not None:
+        closed_count += task.close_streams()
+
+    if not scan_heap:
+        gc.collect()
+        return closed_count
+
     targets = set()
     if task_filepaths:
         for p in task_filepaths:
@@ -72,7 +85,7 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
 
     if not targets:
         gc.collect()
-        return 0
+        return closed_count
 
     for obj in gc.get_objects():
         try:
@@ -93,7 +106,12 @@ def release_file_handles(download_dir: str, task_filepaths: Iterable[str] | None
     return closed_count
 
 
-def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0.1) -> bool:
+def remove_file_with_retry(
+    filepath: str,
+    max_retries: int = 5,
+    delay: float = 0.1,
+    task: DownloadTask | None = None,
+) -> bool:
     """
     Attempts to remove a file, retrying with bounded backoff if temporarily locked
     by the Windows filesystem.
@@ -102,6 +120,8 @@ def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0
     On Windows NTFS, file handle release by the OS can experience brief latency after
     Python stream close and garbage collection. Bounded retries (default 5 attempts with
     100ms backoff) tolerate this delay before logging warnings or failing.
+    If task is provided, direct handle release is performed without gc.get_objects()
+    heap traversal overhead during retries.
     """
     for attempt in range(max_retries):
         try:
@@ -112,7 +132,11 @@ def remove_file_with_retry(filepath: str, max_retries: int = 5, delay: float = 0
         except (OSError, PermissionError) as e:
             if attempt < max_retries - 1:
                 time.sleep(delay)
-                release_file_handles(os.path.dirname(filepath), [filepath])
+                if task is not None:
+                    task.close_streams()
+                    gc.collect()
+                else:
+                    release_file_handles(os.path.dirname(filepath), [filepath])
             else:
                 logger.warning(f"Could not remove file {filepath}: {e}")
                 return False
@@ -159,7 +183,11 @@ def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> l
         all_tracked.add(os.path.abspath(os.path.join(download_dir, clean_title)))
 
     # Ensure open Python file streams belonging to THIS task are closed first
-    release_file_handles(download_dir, all_tracked)
+    if task.open_streams:
+        task.close_streams()
+        gc.collect()
+    else:
+        release_file_handles(download_dir, all_tracked, task=task)
 
     deleted = []
     try:
@@ -225,7 +253,7 @@ def cleanup_task_files(task: DownloadTask, download_dir: str | None = None) -> l
                 ):
                     should_remove = True
 
-        if should_remove and remove_file_with_retry(fp):
+        if should_remove and remove_file_with_retry(fp, task=task):
             deleted.append(fp)
 
     gc.collect()
