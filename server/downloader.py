@@ -5,6 +5,7 @@ import uuid
 
 from server.cleanup import cleanup_task_files
 from server.config import load_settings, match_provider
+from server.diagnostics import redact_url
 from server.engine import execute_download
 from server.task import DownloadTask
 from server.utils import (
@@ -124,7 +125,7 @@ class DownloadManager:
             self.tasks[task_id] = task
             self.task_order.append(task_id)
 
-        logger.info(f"Task {task_id} [{task.provider_name}] added to queue for {url}")
+        logger.info("Task %s [%s] added to queue for %s", task_id, task.provider_name, redact_url(url))
         return task
 
     def cancel_task(self, task_id: str) -> bool:

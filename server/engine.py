@@ -11,6 +11,12 @@ import yt_dlp
 
 from server.cleanup import cleanup_task_files
 from server.config import load_settings, match_provider
+from server.diagnostics import (
+    YtdlpLogger,
+    redact_message,
+    redact_url,
+    summarize_headers,
+)
 from server.patches import apply_ytdlp_patches
 from server.resolvers import resolve_url
 from server.task import DownloadTask
@@ -34,7 +40,8 @@ DEFAULT_HTTP_HEADERS: dict[str, str] = {
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     ),
     "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
+    # Override yt-dlp's language default for media requests without a captured value.
+    "Accept-Language": "",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Site": "cross-site",
@@ -75,6 +82,11 @@ def build_ydl_options(
         "nocheckcertificate": nocheckcertificate,
         "overwrites": True,
     }
+    verbose = os.environ.get("VIDEO_DL_DEBUG", "").lower() in {"1", "true", "yes"}
+    ydl_opts["logger"] = YtdlpLogger(task.id, verbose=verbose)
+    ydl_opts["verbose"] = verbose
+    # Keep UI progress hooks active while avoiding a console line for each update.
+    ydl_opts["noprogress"] = not verbose
 
     # Format / Quality configuration
     q = task.quality.lower()
@@ -119,6 +131,8 @@ def build_ydl_options(
                 headers["Origin"] = v
             elif k_lower == "cookie":
                 headers["Cookie"] = v
+            elif k_lower == "accept-language":
+                headers["Accept-Language"] = v
             else:
                 headers[k] = v
 
@@ -181,7 +195,8 @@ def execute_download(
 
     task.status = "downloading"
     task.started_at = time.time()
-    logger.info(f"Starting download for task {task.id}: {task.url}")
+    logger.info("Starting download for task %s: %s", task.id, redact_url(task.url))
+    logger.info("Task %s captured headers: %s", task.id, summarize_headers(task.headers))
 
     download_url = task.url
     download_headers = dict(task.headers)
@@ -268,6 +283,7 @@ def execute_download(
     )
 
     def _run_ydl(opts: dict[str, Any]) -> None:
+        logger.info("Task %s effective headers: %s; TLS mode=%s", task.id, summarize_headers(opts["http_headers"]), tls_mode)
         with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
             # First extract info (without re-downloading if we can fetch title/thumbnail)
             try:
@@ -299,7 +315,7 @@ def execute_download(
                     except (KeyError, ValueError, TypeError, AttributeError, OSError) as plan_err:
                         logger.debug(f"Planned filename estimation non-fatal warning: {plan_err}")
             except Exception as extract_err:  # noqa: BLE001 - non-fatal pre-extraction failure should not abort download
-                logger.debug(f"Pre-extraction info non-fatal warning: {extract_err}")
+                logger.warning("Task %s metadata pre-extraction failed; retrying download: %s", task.id, redact_message(str(extract_err)))
 
             if task.cancel_requested:
                 raise DownloadCancelledError("Download cancelled by user.")
@@ -390,7 +406,7 @@ def execute_download(
         else:
             task.status = "failed"
             task.error_message = str(e)
-            logger.error(f"Task {task.id} failed: {e}")
+            logger.error("Task %s failed: %s", task.id, redact_message(str(e)))
         task.completed_at = time.time()
         del e
         gc.collect()

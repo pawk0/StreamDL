@@ -1,3 +1,8 @@
+from typing import Any, cast
+
+import pytest
+from yt_dlp import YoutubeDL
+
 from server.config import match_provider
 from server.engine import build_ydl_options
 from server.task import DownloadTask
@@ -49,6 +54,41 @@ def test_build_ydl_options_default_browser_headers():
     assert headers["Sec-Fetch-Mode"] == "cors"
     assert headers["Sec-Fetch-Dest"] == "empty"
     assert opts["concurrent_fragment_downloads"] == 1
+
+
+@pytest.mark.parametrize(
+    ("custom_headers", "expected_language"),
+    [
+        pytest.param(None, "", id="no-captured-headers"),
+        pytest.param({}, "", id="empty-captured-headers"),
+        pytest.param({"Referer": "https://example.com/player"}, "", id="no-language"),
+        pytest.param({"Accept-Language": ""}, "", id="explicit-empty"),
+        pytest.param({"accept-language": ""}, "", id="lowercase-empty"),
+        pytest.param({"Accept-Language": "pl-PL,pl;q=0.9"}, "pl-PL,pl;q=0.9", id="captured"),
+        pytest.param({"accept-language": "en-US,en;q=0.9"}, "en-US,en;q=0.9", id="lowercase"),
+        pytest.param({"ACCEPT-LANGUAGE": "de-DE"}, "de-DE", id="uppercase"),
+        pytest.param({"Accept-Language": "en-GB,en;q=0.9"}, "en-GB,en;q=0.9", id="captured-firefox"),
+    ],
+)
+def test_build_ydl_options_language_header(custom_headers, expected_language, tmp_path):
+    task = DownloadTask(task_id="language-header", url="https://example.com/stream.m3u8")
+    opts = build_ydl_options(
+        task=task,
+        download_dir=str(tmp_path),
+        progress_hook=lambda d: None,
+        postprocessor_hook=lambda d: None,
+        custom_headers=custom_headers,
+    )
+
+    headers = opts["http_headers"]
+    assert {k: v for k, v in headers.items() if k.lower() == "accept-language"} == {
+        "Accept-Language": expected_language,
+    }
+    # Exercise yt-dlp's real default merge without making a network request.
+    with YoutubeDL(cast(Any, opts)) as ydl:
+        merged_headers = ydl.params["http_headers"]
+        assert merged_headers is not None
+        assert merged_headers["Accept-Language"] == expected_language
 
 
 def test_build_ydl_options_origin_derivation_from_referer():

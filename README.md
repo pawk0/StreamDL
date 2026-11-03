@@ -78,6 +78,17 @@ We provide automated 1-click Windows batch scripts:
 3. Open your browser and navigate to:
    **[http://localhost:7921](http://localhost:7921)** to view the Web UI dashboard.
 
+Console logging uses `INFO` by default. Download progress updates remain available in the Web UI;
+per-update console progress is disabled. To enable detailed yt-dlp diagnostics and console progress,
+set `VIDEO_DL_DEBUG=1` before starting the server:
+
+```powershell
+$env:VIDEO_DL_DEBUG = "1"
+.\run_server.bat
+```
+
+Set `$env:VIDEO_DL_DEBUG = "0"` and restart the server to return to normal output.
+
 ---
 
 ### Step 2: Install the Browser Extension

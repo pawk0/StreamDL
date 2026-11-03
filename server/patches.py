@@ -1,11 +1,16 @@
 import logging
 import sys
 import urllib.parse
-from typing import Any
+from functools import wraps
+from typing import Any, cast
 
 import yt_dlp
 import yt_dlp.utils
 import yt_dlp.utils._utils
+from yt_dlp.networking.common import RequestHandler
+from yt_dlp.networking.exceptions import HTTPError
+
+from server.diagnostics import redact_url, summarize_headers
 
 logger = logging.getLogger("video_dl.patches")
 
@@ -25,7 +30,12 @@ def apply_ytdlp_patches() -> None:
        common in KVS and tube CDN architectures).
        Maintains full CVE-2024-38519 / GHSA-79w7-vh3h-8g4j security guarantees:
        files are strictly saved as valid media files (e.g. .mp4), never as executable scripts.
+
+    2. HTTP media headers:
+       Treat an empty Accept-Language override as omission after all yt-dlp defaults
+       are merged, and report redacted manifest requests and HTTP failures.
     """
+    _patch_http_headers()
     orig_determine_ext: Any = getattr(yt_dlp.utils, "_orig_determine_ext", None)
     if orig_determine_ext is None:
         orig_determine_ext = yt_dlp.utils.determine_ext
@@ -82,3 +92,54 @@ def apply_ytdlp_patches() -> None:
                 mod.determine_ext = smart_determine_ext  # pyrefly: ignore [missing-attribute] - dynamically patching already-loaded modules
             except (AttributeError, TypeError) as mod_err:
                 logger.debug(f"Could not patch determine_ext on module {getattr(mod, '__name__', mod)}: {mod_err}")
+
+
+def _patch_http_headers() -> None:
+    """Omit empty language headers after yt-dlp merges all request defaults."""
+    # Private transport methods are missing from the third-party type stubs.
+    handler_type = cast(Any, RequestHandler)
+    original = handler_type._get_headers
+    if getattr(original, "_video_dl_patched", False):
+        return
+    original_send = handler_type.send
+
+    @wraps(original)
+    def get_headers(self, request):
+        headers = original(self, request)
+        for name in list(headers):
+            if name.lower() == "accept-language" and not headers[name]:
+                del headers[name]
+        path = urllib.parse.urlsplit(request.url).path.lower()
+        prefix = "" if path.endswith((".m3u8", ".mpd")) else "[debug] "
+        self._logger.info(
+            f"{prefix}[http] {request.method} {redact_url(request.url)} "
+            f"via {self.RH_NAME}; headers={summarize_headers(headers)}; "
+            f"Accept-Language={'present' if any(k.lower() == 'accept-language' for k in headers) else 'absent'}; "
+            f"cookie_jar={'present' if len(self._get_cookiejar(request)) else 'empty'}; "
+            f"proxy_schemes={sorted(self._get_proxies(request))}"
+        )
+        return headers
+
+    @wraps(original_send)
+    def send(self, request):
+        try:
+            response = original_send(self, request)
+        except HTTPError as exc:
+            response_headers = {
+                name: exc.response.headers[name]
+                for name in ("Server", "Content-Type", "Location", "Retry-After")
+                if name in exc.response.headers
+            }
+            self._logger.warning(
+                f"[http] HTTP {exc.status} {request.method} {redact_url(request.url)} "
+                f"via {self.RH_NAME}; response_url={redact_url(exc.response.url)}; "
+                f"response_headers={summarize_headers(response_headers)}"
+            )
+            raise
+        if urllib.parse.urlsplit(request.url).path.lower().endswith((".m3u8", ".mpd")):
+            self._logger.info(f"[http] HTTP {response.status} {redact_url(response.url)} via {self.RH_NAME}")
+        return response
+
+    cast(Any, get_headers)._video_dl_patched = True
+    handler_type._get_headers = get_headers
+    handler_type.send = send

@@ -21,6 +21,8 @@ def extension_page():
             window.__mockStorage = {};
             window.__messageListeners = [];
             window.__contextMenus = [];
+            window.__requestListeners = [];
+            window.__responseListeners = [];
             window.chrome = {
                 runtime: {
                     onMessage: {
@@ -46,10 +48,10 @@ def extension_page():
                     }
                 },
                 webRequest: {
-                    onBeforeRequest: { addListener: () => {} },
+                    onBeforeRequest: { addListener: cb => window.__requestListeners.push(cb) },
                     onBeforeSendHeaders: { addListener: () => {} },
                     onSendHeaders: { addListener: () => {} },
-                    onHeadersReceived: { addListener: () => {} }
+                    onHeadersReceived: { addListener: cb => window.__responseListeners.push(cb) }
                 },
                 tabs: {
                     onRemoved: { addListener: () => {} },
@@ -71,6 +73,99 @@ def extension_page():
 
         yield page
         browser.close()
+
+
+@pytest.mark.parametrize(
+    ("initial_path", "next_path", "expected_path"),
+    [
+        ("master.m3u8?t=old", "master.m3u8?t=fresh", "master.m3u8?t=fresh"),
+        ("master.m3u8?t=old", "720p.m3u8?t=child", "master.m3u8?t=old"),
+        ("720p.m3u8?t=old", "master.m3u8?t=fresh", "master.m3u8?t=fresh"),
+        ("720p.m3u8?t=old", "720p.m3u8?t=fresh", "720p.m3u8?t=fresh"),
+        ("video.mp4?t=old", "video.mp4?t=fresh", "video.mp4?t=fresh"),
+        ("master.m3u8?t=old", "master-final.m3u8?t=other", "master.m3u8?t=old"),
+    ],
+    ids=["refresh-master", "keep-master-over-child", "prefer-master", "refresh-child", "refresh-mp4", "keep-distinct-master"],
+)
+def test_stream_registration_refreshes_signed_urls(extension_page, initial_path, next_path, expected_path):
+    result = extension_page.evaluate("""([initialPath, nextPath]) => {
+        const tabId = window.__nextStreamTestTab = (window.__nextStreamTestTab || 100) + 1;
+        const base = "https://cdn.example.com/video/";
+        registerStream(tabId, base + initialPath, "", "", "https://player.example.com/", "Video", {"User-Agent": "Captured"});
+        registerStream(tabId, base + nextPath);
+        let streams;
+        window.__messageListeners[0]({action: "GET_TAB_STREAMS", tabId}, {}, (response) => { streams = response.streams; });
+        return streams;
+    }""", [initial_path, next_path])
+    assert len(result) == 1
+    assert result[0]["url"] == "https://cdn.example.com/video/" + expected_path
+    assert result[0]["headers"]["User-Agent"] == "Captured"
+    assert result[0]["referer"] == "https://player.example.com/"
+
+
+@pytest.mark.parametrize("late_source", ["response", "dom"])
+def test_late_discovery_cannot_restore_old_token(extension_page, late_source):
+    streams = extension_page.evaluate("""source => {
+        const tabId = window.__nextStreamTestTab = (window.__nextStreamTestTab || 100) + 1;
+        const oldUrl = "https://cdn.example.com/video/master.m3u8?t=old";
+        const newUrl = "https://cdn.example.com/video/master.m3u8?t=new";
+        const request = url => window.__requestListeners[0]({tabId, url, type: "media"});
+        request(oldUrl);
+        request(newUrl);
+        if (source === "response") {
+            window.__responseListeners[0]({tabId, url: oldUrl, type: "media",
+                responseHeaders: [{name: "Content-Type", value: "application/vnd.apple.mpegurl"}]});
+        } else {
+            window.__messageListeners[0]({action: "REGISTER_DOM_MEDIA", url: oldUrl}, {tab: {id: tabId}}, () => {});
+        }
+        let result;
+        window.__messageListeners[0]({action: "GET_TAB_STREAMS", tabId}, {}, r => result = r.streams);
+        return result;
+    }""", late_source)
+    assert len(streams) == 1
+    assert streams[0]["url"].endswith("?t=new")
+
+
+def test_response_can_discover_unregistered_stream(extension_page):
+    streams = extension_page.evaluate("""() => {
+        const tabId = window.__nextStreamTestTab = (window.__nextStreamTestTab || 100) + 1;
+        window.__responseListeners[0]({tabId, url: "https://cdn.example.com/video/stream",
+            type: "xmlhttprequest", responseHeaders: [{name: "Content-Type", value: "video/mp4"}]});
+        let result;
+        window.__messageListeners[0]({action: "GET_TAB_STREAMS", tabId}, {}, r => result = r.streams);
+        return result;
+    }""")
+    assert len(streams) == 1
+    assert streams[0]["url"] == "https://cdn.example.com/video/stream"
+
+
+def test_captured_language_reaches_download_api(extension_page):
+    payloads = []
+
+    def capture_download(route):
+        payloads.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type="application/json", body='{"success": true}')
+
+    extension_page.route("**/api/download", capture_download)
+    result = extension_page.evaluate("""async () => {
+        const headers = extractHeaders([
+            {name: "accept-language", value: "en-GB,en;q=0.9"},
+            {name: "User-Agent", value: "CapturedFirefox"},
+            {name: "Referer", value: "https://player.example.com/"},
+            {name: "Cookie", value: "session=original"}
+        ]);
+        return await sendDownloadRequest({url: "https://cdn.example.com/master.m3u8?t=original", headers});
+    }""")
+    assert result["success"] is True
+    assert len(payloads) == 1
+    assert payloads[0]["url"] == "https://cdn.example.com/master.m3u8?t=original"
+    assert payloads[0]["headers"] == {
+        "Accept-Language": "en-GB,en;q=0.9",
+        "User-Agent": "CapturedFirefox",
+        "Referer": "https://player.example.com/",
+        "Origin": "https://player.example.com",
+        "Cookie": "session=original",
+    }
 
 
 def test_send_download_duplicate_task_error_propagated(extension_page):

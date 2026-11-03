@@ -162,7 +162,7 @@ function analyzeStreamUrl(url, typeHint = "", contentType = "") {
 }
 
 /**
- * Extracts essential headers (Referer, Origin, User-Agent, Cookie) from Chrome requestHeaders array.
+ * Extracts captured request context, including the browser's actual language preference.
  */
 function extractHeaders(requestHeaders) {
   const result = {};
@@ -178,6 +178,8 @@ function extractHeaders(requestHeaders) {
       result["User-Agent"] = h.value;
     } else if (lower === "cookie") {
       result["Cookie"] = h.value;
+    } else if (lower === "accept-language") {
+      result["Accept-Language"] = h.value;
     }
   }
   return result;

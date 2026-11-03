@@ -5,7 +5,7 @@ if (typeof importScripts === "function") {
 
 const streamsByTab = new Map();
 
-function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "", headers = {}) {
+function registerStream(tabId, url, typeHint = "", contentType = "", referer = "", pageTitle = "", headers = {}, refreshUrl = true) {
   if (tabId < 0 || !url || !url.startsWith("http")) return;
 
   const streamInfo = analyzeStreamUrl(url, typeHint, contentType);
@@ -31,11 +31,14 @@ function registerStream(tabId, url, typeHint = "", contentType = "", referer = "
 
   if (existingIndex !== -1) {
     const existing = tabStreams[existingIndex];
-    if (streamInfo.isMaster && !existing.isMaster) {
+    const sameResource = url.split(/[?#]/, 1)[0] === existing.url.split(/[?#]/, 1)[0];
+    // Only request starts can refresh a signed URL; delayed responses or DOM
+    // discoveries must not restore an older token for the same resource.
+    if ((sameResource && refreshUrl) || (streamInfo.isMaster && !existing.isMaster)) {
       tabStreams[existingIndex] = {
         url: url,
         type: streamInfo.type,
-        isMaster: true,
+        isMaster: streamInfo.isMaster,
         filename: streamInfo.filename,
         referer: referer || existing.referer || "",
         headers: { ...(existing.headers || {}), ...(headers || {}) },
@@ -144,7 +147,10 @@ chrome.webRequest.onHeadersReceived.addListener(
         details.url,
         details.type,
         contentType,
-        details.initiator || details.originUrl || details.documentUrl || ""
+        details.initiator || details.originUrl || details.documentUrl || "",
+        "",
+        {},
+        false
       );
     }
   },
@@ -155,7 +161,7 @@ chrome.webRequest.onHeadersReceived.addListener(
   ["responseHeaders"]
 );
 
-// 4. Intercept request headers to capture Referer, Origin, User-Agent, Cookie for streams
+// 4. Intercept request headers to preserve browser request context for streams
 const sendHeadersOptions = ["requestHeaders"];
 if (
   typeof chrome !== "undefined" &&
@@ -268,7 +274,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         "media",
         "",
         message.referer || (sender.tab ? sender.tab.url : ""),
-        message.title || ""
+        message.title || "",
+        {},
+        false
       );
     }
   }

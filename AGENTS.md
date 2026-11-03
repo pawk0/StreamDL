@@ -5,27 +5,14 @@
   - Linter: `.\.venv\Scripts\python.exe -m ruff check <path>`
   - Type Checker: `.\.venv\Scripts\python.exe -m pyrefly check`
   - Tests: `.\.venv\Scripts\python.exe -m pytest`
-- **Post-Change Verification**: Always run both `pyrefly` and `ruff` checks after making changes to ensure there are no type errors or linting violations:
-  - `.\.venv\Scripts\python.exe -m pyrefly check`
-  - `.\.venv\Scripts\python.exe -m ruff check <path>` (or `.\.venv\Scripts\python.exe -m ruff check .`)
-- **Safeguard Verification**: Whenever applying automated linting or formatting fixes (`ruff check --fix`), immediately run the test suite to ensure that auto-fixes have not introduced regressions or removed necessary side-effect imports.
 
 ## Code & Typing Standards
-- **Typing Syntax**: Use modern Python typing features:
-  - PEP 585 (Python 3.9+) built-in generics: `list[T]`, `dict[K, V]`, `set[T]`, `tuple[...]` instead of `typing.List`, `typing.Dict`, etc.
-  - PEP 604 (Python 3.10+) union types: `T | None` and `TypeA | TypeB` instead of `typing.Optional[T]` or `typing.Union`.
-  - Import callables from `collections.abc import Callable`.
 - **Suppression Explanations**: Any type checker or linter suppressions (`pyrefly: ignore` or ruff `noqa`) must include a short explanation justifying why the suppression is necessary (e.g. `# pyrefly: ignore [bad-assignment] - dynamic monkey-patch`).
-- **String Prefix & Suffix Checking**: Pass tuples to `str.startswith(...)` and `str.endswith(...)` (e.g. `s.startswith(("index-f", "master-"))`) instead of chaining multiple `or` expressions.
-- **Exception Handling**: Avoid bare `except Exception: pass` where possible; log non-fatal warnings or narrow exceptions unless explicitly building fallback/resilience handlers.
 
 ## Testing Standards & Patterns
-- **Before-and-After Refactoring Verification**:
-  - Prior to initiating any structural refactoring, module decomposition, or import reorganization, execute the complete test suite (`.\.venv\Scripts\python.exe -m pytest`) to establish an explicit passing baseline.
-  - Re-run the full test suite immediately after applying the refactoring to confirm zero functional or test regressions.
 - **Live vs. Fast Test Execution**:
   - End-to-end integration tests that touch external networks are marked `@pytest.mark.live` and excluded by default via `pytest.ini` (`addopts = -m "not live"`).
-  - Always run fast, local unit/mock tests during development (`.\.venv\Scripts\python.exe -m pytest`).
+  - Always run fast, local unit/mock tests during development (`.\.venv\sScripts\python.exe -m pytest`).
   - Never run live tests unconditionally; only run `.\.venv\Scripts\python.exe -m pytest -m live` when explicitly verifying external network connectivity.
 - **Parametrization vs. Multiple Assertions**:
   - **Parametrize** pure transformation functions, validators, and option matrices (e.g. quality options, provider configs) using `@pytest.mark.parametrize`. Each boundary case must run as an independent, descriptive test node.

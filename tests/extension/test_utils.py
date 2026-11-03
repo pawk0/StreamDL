@@ -162,6 +162,21 @@ def test_extract_headers(browser_page):
 
 
 @pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("Accept-Language", "en-GB,en;q=0.9"),
+        ("accept-language", "pl-PL,pl;q=0.9"),
+        ("ACCEPT-LANGUAGE", "en-US,en;q=0.9"),
+    ],
+)
+def test_extract_headers_preserves_browser_language(browser_page, name, value):
+    result = browser_page.evaluate(
+        "headers => StreamDLUtils.extractHeaders(headers)", [{"name": name, "value": value}],
+    )
+    assert result == {"Accept-Language": value}
+
+
+@pytest.mark.parametrize(
     ("referer", "expected_origin"),
     [
         ("https://player.example.com:8443/embed/video?id=1", "https://player.example.com:8443"),
