@@ -35,7 +35,7 @@ def index():
 def get_status():
     settings = load_settings()
     tasks = manager.get_all_tasks()
-    active = sum(1 for t in tasks if t["status"] in ["downloading", "processing"])
+    active = sum(1 for t in tasks if t["status"] in ["downloading", "processing", "pausing", "resuming"])
     queued = sum(1 for t in tasks if t["status"] == "queued")
     completed = sum(1 for t in tasks if t["status"] == "completed")
     
@@ -93,7 +93,7 @@ def queue_download():
 def get_queue():
     settings = load_settings()
     tasks = manager.get_all_tasks()
-    active_count = sum(1 for t in tasks if t["status"] in ["downloading", "processing"])
+    active_count = sum(1 for t in tasks if t["status"] in ["downloading", "processing", "pausing", "resuming"])
     queued_count = sum(1 for t in tasks if t["status"] == "queued")
 
     return jsonify({
@@ -113,6 +113,20 @@ def cancel_task(task_id: str):
     if success:
         return jsonify({"success": True, "message": f"Task {task_id} cancelled"})
     return jsonify({"success": False, "error": "Task not found or already finished"}), 404
+
+
+@app.route("/api/pause/<task_id>", methods=["POST"])
+def pause_task(task_id: str):
+    if manager.pause_task(task_id):
+        return jsonify({"success": True, "task": manager.get_task(task_id)})
+    return jsonify({"success": False, "error": "Task not found or cannot be paused"}), 409
+
+
+@app.route("/api/resume/<task_id>", methods=["POST"])
+def resume_task(task_id: str):
+    if manager.resume_task(task_id):
+        return jsonify({"success": True, "task": manager.get_task(task_id)})
+    return jsonify({"success": False, "error": "Task not found or cannot be resumed"}), 409
 
 
 @app.route("/api/clear", methods=["POST"])

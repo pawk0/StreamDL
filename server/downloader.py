@@ -82,7 +82,7 @@ class DownloadManager:
 
             # Check for duplicate tasks in active states
             for existing in self.tasks.values():
-                if existing.status in ["queued", "downloading", "processing"]:
+                if existing.status in ["queued", "downloading", "processing", "pausing", "paused", "resuming"]:
                     ex_clean = sanitize_filename(existing.title) if existing.title else None
                     ex_sanitized = (
                         ex_clean.lower()
@@ -128,6 +128,45 @@ class DownloadManager:
         logger.info("Task %s [%s] added to queue for %s", task_id, task.provider_name, redact_url(url))
         return task
 
+    def pause_task(self, task_id: str) -> bool:
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if not task or task.status not in {"queued", "downloading", "processing"} or task.pause_requested:
+                return False
+            task.pause_requested = True
+            task.status = "pausing" if task_id in self._active_threads else "paused"
+            task.speed = "0 B/s"
+            task.speed_raw = 0
+            task.eta = "--:--"
+            return True
+
+    def resume_task(self, task_id: str) -> bool:
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if not task or not task.pause_requested or task.resume_requested or task.cancel_requested:
+                return False
+            if task.status in {"completed", "failed", "cancelled"}:
+                return False
+            thread = self._active_threads.get(task_id)
+            if thread and thread.is_alive():
+                # Restart directly after the old worker releases its file handles.
+                task.resume_requested = True
+                task.status = "resuming"
+            else:
+                self._start_task_locked(task)
+            return True
+
+    def _start_task_locked(self, task: DownloadTask) -> None:
+        """Start under the manager lock; explicit resumes bypass queue limits."""
+        task.pause_requested = False
+        task.resume_requested = False
+        task.status = "downloading"
+        task.completed_at = None
+        task.error_message = None
+        th = threading.Thread(target=self._execute_download, args=(task,), daemon=True)
+        self._active_threads[task.id] = th
+        th.start()
+
     def cancel_task(self, task_id: str) -> bool:
         th = None
         with self._lock:
@@ -138,7 +177,7 @@ class DownloadManager:
                 return False
 
             task.cancel_requested = True
-            if task.status == "queued":
+            if task.status in ["queued", "paused"]:
                 task.status = "cancelled"
                 task.completed_at = time.time()
                 self._reserved_names.pop(task_id, None)
@@ -248,14 +287,7 @@ class DownloadManager:
                                 continue
 
                             # Start task in background thread
-                            task.status = "downloading"
-                            th = threading.Thread(
-                                target=self._execute_download,
-                                args=(task,),
-                                daemon=True
-                            )
-                            self._active_threads[tid] = th
-                            th.start()
+                            self._start_task_locked(task)
                             provider_counts[task.provider_id] = p_active + 1
                             slots_available -= 1
                             if slots_available <= 0:
@@ -266,6 +298,14 @@ class DownloadManager:
         try:
             execute_download(task)
         finally:
-            if task.status in ["failed", "cancelled"]:
-                with self._lock:
+            with self._lock:
+                self._active_threads.pop(task.id, None)
+                if task.cancel_requested:
+                    task.status = "cancelled"
+                    task.completed_at = time.time()
+                if task.status in ["failed", "cancelled"]:
                     self._reserved_names.pop(task.id, None)
+                elif task.pause_requested and task.status != "completed":
+                    task.status = "paused"
+                    if task.resume_requested:
+                        self._start_task_locked(task)

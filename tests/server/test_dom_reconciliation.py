@@ -265,3 +265,101 @@ def test_selection_survives_queue_refresh(browser_context, selector):
         assert '85%' in page.locator('[data-id="selected-task"] .progress-bar-fill').get_attribute('style')
     finally:
         page.close()
+
+
+def test_pause_resume_dashboard_controls(browser_context):
+    from playwright.sync_api import expect
+
+    page = browser_context.new_page()
+    task = {
+        "id": "pause-test", "title": "Pause Test", "url": "https://example.com/video.mp4",
+        "quality": "best", "format": "mp4", "status": "downloading", "progress": 25,
+        "downloaded_str": "25MB", "total_str": "100MB", "speed": "1MB/s", "eta": "75s",
+    }
+    actions = []
+    page.route("**/*", lambda route: route.abort())
+    page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
+        content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(
+        content_type="application/json", body=json.dumps({"tasks": [task], "providers": [], "max_concurrent": 1})))
+
+    def control(route):
+        action = route.request.url.split("/")[-2]
+        actions.append((action, route.request.method))
+        task["status"] = "paused" if action == "pause" else "downloading"
+        route.fulfill(content_type="application/json", body=json.dumps({"success": True}))
+
+    page.route(f"{BASE_TEST_URL}/api/pause/*", control)
+    page.route(f"{BASE_TEST_URL}/api/resume/*", control)
+    try:
+        page.goto(f"{BASE_TEST_URL}/")
+        page.get_by_role("button", name="Pause download", exact=True).click()
+        expect(page.locator(".badge-paused")).to_have_text("Paused")
+        expect(page.get_by_role("button", name="Cancel download", exact=True)).to_be_visible()
+        page.locator('[data-filter="active"]').click()
+        expect(page.get_by_role("button", name="Resume download", exact=True)).to_be_visible()
+        page.get_by_role("button", name="Resume download", exact=True).click()
+        expect(page.locator(".badge-downloading")).to_have_text("Downloading")
+        expect(page.get_by_role("button", name="Pause download", exact=True)).to_be_visible()
+        assert actions == [("pause", "POST"), ("resume", "POST")]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("interaction", ["pointer", "keyboard", "pending-request"])
+def test_pause_control_survives_progress_refresh(browser_context, interaction):
+    from playwright.sync_api import expect
+
+    page = browser_context.new_page()
+    task = {
+        "id": "stable-button", "title": "Running download", "url": "https://example.com/video.mp4",
+        "status": "downloading", "progress": 10, "downloaded_str": "10MB", "total_str": "100MB",
+    }
+    requests = []
+    page.route("**/*", lambda route: route.abort())
+    page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
+        content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(json={"tasks": [task]}))
+    page.route(f"{BASE_TEST_URL}/api/pause/*", lambda route: requests.append(route))
+    page.add_init_script("window.setInterval = () => 0;")
+    try:
+        page.goto(f"{BASE_TEST_URL}/")
+        button = page.get_by_role("button", name="Pause download", exact=True)
+        expect(button).to_be_visible()
+        page.evaluate("window.originalPause = document.querySelector('.btn-pause')")
+        if interaction == "pointer":
+            button.hover()
+            page.mouse.down()
+        elif interaction == "keyboard":
+            button.focus()
+        else:
+            button.click()
+            expect(button).to_be_disabled()
+
+        for progress in (25, 50, 75):
+            task["progress"] = progress
+            task["downloaded_str"] = f"{progress}MB"
+            page.evaluate("window.__testFetchQueue()")
+            expect(page.locator(".progress-bar-fill")).to_have_attribute("style", f"width: {progress}%;")
+            assert page.evaluate("window.originalPause === document.querySelector('.btn-pause')")
+            if interaction == "pointer":
+                assert button.evaluate("node => node.matches(':hover')")
+            elif interaction == "keyboard":
+                expect(button).to_be_focused()
+            else:
+                expect(button).to_be_disabled()
+
+        if interaction == "pointer":
+            page.mouse.up()
+        elif interaction == "keyboard":
+            page.keyboard.press("Enter")
+        expect(button).to_be_disabled()
+        assert len(requests) == 1
+        requests[0].fulfill(json={"success": True})
+        expect(button).to_be_enabled()
+    finally:
+        page.close()

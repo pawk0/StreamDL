@@ -122,7 +122,7 @@ function initApp() {
     let completedTasks = 0;
 
     tasks.forEach(t => {
-      if (t.status === 'downloading' || t.status === 'processing') {
+      if (['downloading', 'processing', 'pausing', 'resuming'].includes(t.status)) {
         activeTasks++;
         totalSpeedRaw += (t.speed_raw || 0);
       } else if (t.status === 'queued') {
@@ -144,12 +144,12 @@ function initApp() {
 
     // Tab counts
     countAll.textContent = tasks.length;
-    countActive.textContent = activeTasks + queuedTasks;
+    countActive.textContent = activeTasks + queuedTasks + tasks.filter(t => t.status === 'paused').length;
     countCompleted.textContent = completedTasks;
 
     // Filter tasks
     const filteredTasks = tasks.filter(t => {
-      if (currentFilter === 'active') return t.status === 'downloading' || t.status === 'processing' || t.status === 'queued';
+      if (currentFilter === 'active') return ['downloading', 'processing', 'pausing', 'resuming'].includes(t.status) || t.status === 'queued' || t.status === 'paused';
       if (currentFilter === 'completed') return t.status === 'completed';
       return true;
     });
@@ -161,6 +161,39 @@ function initApp() {
     if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
     if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
     return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  }
+
+  function updateTaskCard(card, html) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    if (!card._renderedSections) {
+      card.innerHTML = html;
+      card._renderedSections = {};
+    }
+
+    // Compare rendered markup, not live DOM: buttons may be disabled while
+    // their request is pending. Progress refreshes must preserve those nodes.
+    for (const selector of ['.task-top', '.task-metrics', '.task-actions']) {
+      const nextHtml = template.content.querySelector(selector).innerHTML;
+      if (card._renderedSections[selector] !== nextHtml) {
+        card.querySelector(selector).innerHTML = nextHtml;
+        card._renderedSections[selector] = nextHtml;
+      }
+    }
+    const progress = card.querySelector('.progress-bar-fill');
+    const nextProgress = template.content.querySelector('.progress-bar-fill');
+    progress.className = nextProgress.className;
+    progress.style.width = nextProgress.style.width;
+
+    const error = card.querySelector('.task-error-text');
+    const nextError = template.content.querySelector('.task-error-text');
+    if (nextError && error) {
+      if (error.textContent !== nextError.textContent) error.textContent = nextError.textContent;
+    } else if (nextError) {
+      card.appendChild(nextError);
+    } else if (error) {
+      error.remove();
+    }
   }
 
   function renderTasks(tasks) {
@@ -201,7 +234,7 @@ function initApp() {
 
       // Status badge and styling
       let statusBadgeClass = `badge-${escapeHtml(task.status)}`;
-      let statusLabel = task.status;
+      let statusLabel = task.status.charAt(0).toUpperCase() + task.status.slice(1);
       if (task.status === 'queued') {
         statusLabel = `Queued #${queuePositionCounter++}`;
       } else if (task.status === 'downloading') {
@@ -223,7 +256,7 @@ function initApp() {
 
       // Action buttons
       let actionButtons = '';
-      if (task.status === 'downloading' || task.status === 'queued') {
+      if (['downloading', 'queued', 'processing', 'pausing', 'paused', 'resuming'].includes(task.status)) {
         actionButtons = `
           <button class="btn btn-danger btn-sm btn-cancel" data-id="${escapeHtml(task.id)}" title="Cancel download" aria-label="Cancel download">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -239,6 +272,12 @@ function initApp() {
         `;
       }
 
+      if (['downloading', 'queued', 'processing'].includes(task.status)) {
+        actionButtons = `<button class="btn btn-secondary btn-sm btn-pause" data-id="${escapeHtml(task.id)}" aria-label="Pause download">Pause</button>` + actionButtons;
+      } else if (['paused', 'pausing'].includes(task.status)) {
+        actionButtons = `<button class="btn btn-secondary btn-sm btn-resume" data-id="${escapeHtml(task.id)}" aria-label="Resume download">Resume</button>` + actionButtons;
+      }
+
       // Metrics display
       let metricsHtml = '';
       if (task.status === 'downloading') {
@@ -248,6 +287,12 @@ function initApp() {
           <span>⏱️ ETA: ${escapeHtml(task.eta)}</span>
           <span>${typeof task.progress === 'number' ? task.progress.toFixed(1) : '0.0'}%</span>
         `;
+      } else if (task.status === 'paused') {
+        metricsHtml = `<span>Paused - partial download saved</span>`;
+      } else if (task.status === 'pausing') {
+        metricsHtml = `<span>Stopping download safely...</span>`;
+      } else if (task.status === 'resuming') {
+        metricsHtml = `<span>Resuming as soon as the previous worker stops...</span>`;
       } else if (task.status === 'queued') {
         metricsHtml = `<span>Waiting in queue for next available slot...</span>`;
       } else if (task.status === 'completed') {
@@ -301,7 +346,7 @@ function initApp() {
       const hasSelection = selection && !selection.isCollapsed
         && selection.containsNode(card, true);
       if (!hasSelection && card._lastHtml !== cardInnerHtml) {
-        card.innerHTML = cardInnerHtml;
+        updateTaskCard(card, cardInnerHtml);
         card._lastHtml = cardInnerHtml;
       }
 
@@ -318,6 +363,23 @@ function initApp() {
 
   // Delegated event listener for task cards (cancel, open file, map provider)
   tasksContainer.addEventListener('click', async (e) => {
+    const controlBtn = e.target.closest('.btn-pause, .btn-resume');
+    if (controlBtn) {
+      const action = controlBtn.classList.contains('btn-pause') ? 'pause' : 'resume';
+      controlBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/${action}/${encodeURIComponent(controlBtn.dataset.id)}`, { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || `Failed to ${action} download`);
+        showToast(action === 'pause' ? 'Pause requested' : 'Resume requested', 'info');
+        fetchQueue();
+      } catch (err) {
+        showToast(err.message || `Failed to ${action} download`, 'error');
+      } finally {
+        controlBtn.disabled = false;
+      }
+      return;
+    }
     const cancelBtn = e.target.closest('.btn-cancel');
     if (cancelBtn) {
       const id = cancelBtn.dataset.id;

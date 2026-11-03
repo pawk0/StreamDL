@@ -37,7 +37,7 @@ class DownloadTask:
         self.provider_name = provider_name or pname
         self.provider_limit = provider_limit or plimit
 
-        self.status = "queued"  # queued, downloading, processing, completed, failed, cancelled
+        self.status = "queued"  # queued, downloading, processing, pausing, paused, resuming, completed, failed, cancelled
         self.progress = 0.0  # 0.0 to 100.0
         self.speed = "0 B/s"
         self.speed_raw = 0
@@ -53,6 +53,9 @@ class DownloadTask:
         self.started_at: float | None = None
         self.completed_at: float | None = None
         self.cancel_requested = False
+        self.pause_requested = False
+        self.resume_requested = False
+        self.output_template: str | None = None
         self.tracked_files: set[str] = set()
         self.open_streams: set[Any] = set()
 
@@ -83,6 +86,9 @@ class DownloadTask:
         return closed
 
     def to_dict(self) -> dict:
+        status = self.status
+        if self.pause_requested and status not in {"paused", "completed", "failed", "cancelled"}:
+            status = "resuming" if self.resume_requested else "pausing"
         return {
             "id": self.id,
             "url": self.url,
@@ -92,7 +98,7 @@ class DownloadTask:
             "provider": self.provider_name,
             "provider_id": self.provider_id,
             "provider_limit": self.provider_limit,
-            "status": self.status,
+            "status": status,
             "progress": self.progress,
             "speed": self.speed,
             "speed_raw": self.speed_raw,

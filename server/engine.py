@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import yt_dlp
 
-from server.cleanup import cleanup_task_files
+from server.cleanup import cleanup_task_files, release_file_handles
 from server.config import load_settings, match_provider
 from server.diagnostics import (
     YtdlpLogger,
@@ -72,7 +72,7 @@ def build_ydl_options(
     nocheckcertificate = (tls_mode == "permissive")
 
     ydl_opts: dict[str, Any] = {
-        "outtmpl": out_template,
+        "outtmpl": task.output_template or out_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
         "quiet": True,
@@ -80,7 +80,8 @@ def build_ydl_options(
         "windowsfilenames": True,
         "restrictfilenames": False,
         "nocheckcertificate": nocheckcertificate,
-        "overwrites": True,
+        "overwrites": False,
+        "continuedl": True,
     }
     verbose = os.environ.get("VIDEO_DL_DEBUG", "").lower() in {"1", "true", "yes"}
     ydl_opts["logger"] = YtdlpLogger(task.id, verbose=verbose)
@@ -152,6 +153,10 @@ def build_ydl_options(
     return ydl_opts
 
 
+class DownloadPausedError(Exception):
+    """Stop the worker while preserving partial files for a later attempt."""
+
+
 class DownloadCancelledError(Exception):
     """Raised when a download task is cancelled by user."""
 
@@ -193,8 +198,12 @@ def execute_download(
         cleanup_task_files(task, download_dir)
         return
 
+    if task.pause_requested:
+        task.status = "pausing"
+        return
+
     task.status = "downloading"
-    task.started_at = time.time()
+    task.started_at = task.started_at or time.time()
     logger.info("Starting download for task %s: %s", task.id, redact_url(task.url))
     logger.info("Task %s captured headers: %s", task.id, summarize_headers(task.headers))
 
@@ -211,10 +220,13 @@ def execute_download(
     except Exception as resolve_err:  # noqa: BLE001 - non-fatal resolver failure falls back to original URL
         logger.warning(f"Stream resolution non-fatal warning for task {task.id} ({task.url}): {resolve_err}")
 
-    def progress_hook(d):
+    def check_interruption():
         if task.cancel_requested:
             raise DownloadCancelledError("Download cancelled by user.")
+        if task.pause_requested:
+            raise DownloadPausedError("Download paused by user.")
 
+    def progress_hook(d):
         status = d.get("status")
         fn = d.get("filename")
         tmpfn = d.get("tmpfilename")
@@ -226,6 +238,7 @@ def execute_download(
         if tmpfn:
             task.tracked_files.add(os.path.abspath(tmpfn))
 
+        check_interruption()
         if status == "downloading":
             task.status = "downloading"
             downloaded = d.get("downloaded_bytes") or 0
@@ -264,14 +277,14 @@ def execute_download(
                 task.filename = os.path.basename(fn)
 
     def postprocessor_hook(d):
-        if task.cancel_requested:
-            raise DownloadCancelledError("Download cancelled by user.")
         fn = d.get("filepath")
         if fn:
             task.tracked_files.add(os.path.abspath(fn))
             if d.get("status") == "finished":
                 task.filepath = os.path.abspath(fn)
                 task.filename = os.path.basename(fn)
+
+        check_interruption()
 
     ydl_opts = build_ydl_options(
         task=task,
@@ -299,7 +312,10 @@ def execute_download(
                         planned_fn = ydl.prepare_filename(info)
                         if planned_fn:
                             planned_stem = os.path.splitext(os.path.basename(planned_fn))[0]
-                            unique_stem = get_unique_base(download_dir, planned_stem)
+                            unique_stem = (
+                                planned_stem if task.output_template
+                                else get_unique_base(download_dir, planned_stem)
+                            )
                             if unique_stem != planned_stem:
                                 task.title = unique_stem
                                 if "outtmpl" in ydl.params and isinstance(ydl.params["outtmpl"], dict):
@@ -308,6 +324,12 @@ def execute_download(
                                     )
                                 planned_fn = ydl.prepare_filename(info)
 
+                            task.output_template = os.path.join(
+                                os.path.dirname(os.path.abspath(planned_fn)),
+                                os.path.splitext(os.path.basename(planned_fn))[0].replace("%", "%%") + ".%(ext)s",
+                            )
+                            if isinstance(ydl.params.get("outtmpl"), dict):
+                                ydl.params["outtmpl"]["default"] = task.output_template
                             task.tracked_files.add(os.path.abspath(planned_fn))
                             if not task.filepath:
                                 task.filepath = os.path.abspath(planned_fn)
@@ -317,8 +339,11 @@ def execute_download(
             except Exception as extract_err:  # noqa: BLE001 - non-fatal pre-extraction failure should not abort download
                 logger.warning("Task %s metadata pre-extraction failed; retrying download: %s", task.id, redact_message(str(extract_err)))
 
-            if task.cancel_requested:
-                raise DownloadCancelledError("Download cancelled by user.")
+            check_interruption()
+
+            # Keep the same naming policy even if metadata pre-extraction failed.
+            if not task.output_template:
+                task.output_template = opts["outtmpl"]
 
             # Perform actual download
             info = ydl.extract_info(download_url, download=True)
@@ -354,9 +379,10 @@ def execute_download(
 
     try:
         try:
+            check_interruption()
             _run_ydl(ydl_opts)
         except Exception as first_err:
-            if task.cancel_requested or isinstance(first_err, DownloadCancelledError):
+            if task.cancel_requested or task.pause_requested or isinstance(first_err, (DownloadCancelledError, DownloadPausedError)):
                 raise
             if is_tls_cert_error(first_err):
                 if tls_mode == "auto" and not ydl_opts.get("nocheckcertificate"):
@@ -387,6 +413,7 @@ def execute_download(
             else:
                 raise
 
+        check_interruption()
         if is_generic_title(task.title):
             task.title = task.filename or f"Video {time.strftime('%Y-%m-%d %H:%M')}"
 
@@ -403,10 +430,17 @@ def execute_download(
             task.status = "cancelled"
             logger.info(f"Task {task.id} was cancelled. Cleaning up temporary files...")
             cleanup_task_files(task, download_dir)
+        elif task.pause_requested or isinstance(e, DownloadPausedError):
+            release_file_handles(download_dir, task.tracked_files, task=task)
+            task.status = "pausing"
+            task.speed = "0 B/s"
+            task.speed_raw = 0
+            task.eta = "--:--"
         else:
             task.status = "failed"
             task.error_message = str(e)
             logger.error("Task %s failed: %s", task.id, redact_message(str(e)))
-        task.completed_at = time.time()
+        if task.status != "pausing":
+            task.completed_at = time.time()
         del e
         gc.collect()

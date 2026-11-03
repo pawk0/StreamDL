@@ -1112,3 +1112,8 @@ input[type="range"] {
     gap: 10px;
   }
 }
+
+.badge-paused, .badge-pausing, .badge-resuming {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
