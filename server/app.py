@@ -135,6 +135,13 @@ def clear_tasks():
     return jsonify({"success": True, "message": "Cleared finished tasks"})
 
 
+@app.route("/api/clear/<task_id>", methods=["POST"])
+def clear_task(task_id: str):
+    if manager.clear_task(task_id):
+        return jsonify({"success": True, "message": f"Task {task_id} cleared"})
+    return jsonify({"success": False, "error": "Task not found or not finished"}), 409
+
+
 @app.route("/api/settings", methods=["GET", "POST"])
 def manage_settings():
     if request.method == "POST":

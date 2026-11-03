@@ -278,6 +278,10 @@ function initApp() {
         actionButtons = `<button class="btn btn-secondary btn-sm btn-resume" data-id="${escapeHtml(task.id)}" aria-label="Resume download">Resume</button>` + actionButtons;
       }
 
+      if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+        actionButtons += `<button class="btn btn-ghost btn-sm btn-clear-task" data-id="${escapeHtml(task.id)}" title="Clear task from list" aria-label="Clear task">Clear</button>`;
+      }
+
       // Metrics display
       let metricsHtml = '';
       if (task.status === 'downloading') {
@@ -363,6 +367,22 @@ function initApp() {
 
   // Delegated event listener for task cards (cancel, open file, map provider)
   tasksContainer.addEventListener('click', async (e) => {
+    const clearBtn = e.target.closest('.btn-clear-task');
+    if (clearBtn) {
+      clearBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/clear/${encodeURIComponent(clearBtn.dataset.id)}`, { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to clear task');
+        showToast('Task cleared', 'info');
+        fetchQueue();
+      } catch (err) {
+        showToast(err.message || 'Failed to clear task', 'error');
+      } finally {
+        clearBtn.disabled = false;
+      }
+      return;
+    }
     const controlBtn = e.target.closest('.btn-pause, .btn-resume');
     if (controlBtn) {
       const action = controlBtn.classList.contains('btn-pause') ? 'pause' : 'resume';
