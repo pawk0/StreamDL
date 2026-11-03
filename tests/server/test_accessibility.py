@@ -1,6 +1,7 @@
 import os
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 
 
 class ButtonAttrParser(HTMLParser):
@@ -58,12 +59,9 @@ def test_extension_popup_buttons_have_aria_labels():
 
 
 def test_app_js_dynamic_buttons_have_aria_labels():
-    """Ensure dynamically generated buttons in server/static/js/app.js have aria-label attributes."""
-    js_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../server/static/js/app.js"))
-    assert os.path.exists(js_path), f"File not found: {js_path}"
-
-    with open(js_path, encoding="utf-8") as f:
-        js_content = f.read()
+    """Ensure dynamically generated buttons in dashboard modules have aria-label attributes."""
+    js_dir = Path(__file__).resolve().parents[2] / "server" / "static" / "js"
+    js_content = "\n".join(path.read_text(encoding="utf-8") for path in js_dir.glob("*.js"))
 
     # Verify btn-remove-provider has aria-label
     assert re.search(r'class="btn-remove-provider"[^>]*aria-label="Delete Provider"', js_content)

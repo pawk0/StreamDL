@@ -169,7 +169,14 @@ video_dl/
 │   ├── utils.py                # Pure formatting & filename sanitation utils
 │   ├── static/
 │   │   ├── css/style.css       # Modern dark glassmorphic dashboard CSS
-│   │   └── js/app.js           # Real-time polling & UI controller
+│   │   └── js/                 # Native ES modules (no build step)
+│   │       ├── app.js          # Dashboard initialization and wiring
+│   │       ├── queue.js        # Queue polling and refresh serialization
+│   │       ├── tasks-view.js   # Task rendering, filters, and DOM reconciliation
+│   │       ├── download-actions.js # Download forms and task controls
+│   │       ├── settings.js     # Settings and provider-list editor
+│   │       ├── provider-mapping.js # Quick provider mapping dialog
+│   │       └── ui.js           # Escaping, URL sanitation, and notifications
 │   └── templates/
 │       └── index.html          # Dashboard HTML template
 │

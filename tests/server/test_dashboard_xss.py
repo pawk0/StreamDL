@@ -21,7 +21,6 @@ def test_dashboard_xss_sanitization(browser_context):
     page = browser_context.new_page()
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
-    app_js = APP_JS_PATH.read_text(encoding="utf-8")
 
     # Set up mock queue response containing malicious XSS payloads across all user/remote-controlled fields
     malicious_tasks = [
@@ -74,8 +73,8 @@ def test_dashboard_xss_sanitization(browser_context):
         lambda route: route.fulfill(status=200, content_type="text/html", body=html_content),
     )
     page.route(
-        f"{BASE_TEST_URL}/static/js/app.js",
-        lambda route: route.fulfill(status=200, content_type="application/javascript", body=app_js),
+        f"{BASE_TEST_URL}/static/js/*.js",
+        lambda route: route.fulfill(status=200, content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")),
     )
     page.route(
         f"{BASE_TEST_URL}/api/queue",

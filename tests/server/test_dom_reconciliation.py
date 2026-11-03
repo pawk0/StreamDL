@@ -22,7 +22,6 @@ def test_dom_reconciliation_preserves_card_elements(browser_context):
     page = browser_context.new_page()
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
-    app_js = APP_JS_PATH.read_text(encoding="utf-8")
 
     current_tasks = [
         {
@@ -58,8 +57,8 @@ def test_dom_reconciliation_preserves_card_elements(browser_context):
         lambda route: route.fulfill(status=200, content_type="text/html", body=html_content),
     )
     page.route(
-        f"{BASE_TEST_URL}/static/js/app.js",
-        lambda route: route.fulfill(status=200, content_type="application/javascript", body=app_js),
+        f"{BASE_TEST_URL}/static/js/*.js",
+        lambda route: route.fulfill(status=200, content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")),
     )
     page.route(
         f"{BASE_TEST_URL}/api/queue",
@@ -121,7 +120,6 @@ def test_dom_reconciliation_task_lifecycle_and_delegation(browser_context):
     page = browser_context.new_page()
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
-    app_js = APP_JS_PATH.read_text(encoding="utf-8")
 
     cancel_called = []
     open_called = []
@@ -157,8 +155,8 @@ def test_dom_reconciliation_task_lifecycle_and_delegation(browser_context):
         lambda route: route.fulfill(status=200, content_type="text/html", body=html_content),
     )
     page.route(
-        f"{BASE_TEST_URL}/static/js/app.js",
-        lambda route: route.fulfill(status=200, content_type="application/javascript", body=app_js),
+        f"{BASE_TEST_URL}/static/js/*.js",
+        lambda route: route.fulfill(status=200, content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")),
     )
     page.route(
         f"{BASE_TEST_URL}/api/queue",
@@ -225,8 +223,8 @@ def test_selection_survives_queue_refresh(browser_context, selector):
         lambda route: route.fulfill(content_type='text/html', body=INDEX_HTML_PATH.read_text(encoding='utf-8')),
     )
     page.route(
-        f'{BASE_TEST_URL}/static/js/app.js',
-        lambda route: route.fulfill(content_type='application/javascript', body=APP_JS_PATH.read_text(encoding='utf-8')),
+        f'{BASE_TEST_URL}/static/js/*.js',
+        lambda route: route.fulfill(content_type='application/javascript', body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")),
     )
     page.route(
         f'{BASE_TEST_URL}/api/queue',
@@ -280,8 +278,8 @@ def test_clear_individual_task(browser_context, status):
     page.route("**/*", lambda route: route.abort())
     page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
         content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
-    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
-        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/*.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")))
     page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(json={"tasks": tasks}))
 
     def clear(route):
@@ -314,8 +312,8 @@ def test_pause_resume_dashboard_controls(browser_context):
     page.route("**/*", lambda route: route.abort())
     page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
         content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
-    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
-        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/*.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")))
     page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(
         content_type="application/json", body=json.dumps({"tasks": [task], "providers": [], "max_concurrent": 1})))
 
@@ -355,8 +353,8 @@ def test_pause_control_survives_progress_refresh(browser_context, interaction):
     page.route("**/*", lambda route: route.abort())
     page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
         content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
-    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
-        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/*.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")))
     page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(json={"tasks": [task]}))
     page.route(f"{BASE_TEST_URL}/api/pause/*", lambda route: requests.append(route))
     page.add_init_script("window.setInterval = () => 0;")
@@ -395,5 +393,72 @@ def test_pause_control_survives_progress_refresh(browser_context, interaction):
         assert len(requests) == 1
         requests[0].fulfill(json={"success": True})
         expect(button).to_be_enabled()
+    finally:
+        page.close()
+
+
+def test_dashboard_settings_mapping_and_download_workflow(browser_context):
+    """Exercise the module boundaries with the real module loader and mocked API."""
+    from playwright.sync_api import expect
+
+    page = browser_context.new_page()
+    settings = {"providers": [], "max_concurrent": 3, "download_dir": "test-downloads"}
+    downloads = []
+    task = {
+        "id": "mapping-task", "title": "Sample", "url": "https://example.com/video.mp4",
+        "status": "queued", "provider_id": "example.com", "provider": "example.com",
+    }
+
+    def settings_response(route):
+        if route.request.method == "POST":
+            settings.update(route.request.post_data_json)
+        route.fulfill(json={"success": True, "settings": settings})
+
+    def download_response(route):
+        downloads.append(route.request.post_data_json)
+        route.fulfill(json={"success": True})
+
+    page.route("**/*", lambda route: route.abort())
+    page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
+        content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/*.js", lambda route: route.fulfill(
+        content_type="application/javascript",
+        body=(APP_JS_PATH.parent / route.request.url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(json={
+        "tasks": [task], "providers": settings["providers"], "max_concurrent": settings["max_concurrent"],
+    }))
+    page.route(f"{BASE_TEST_URL}/api/settings", settings_response)
+    page.route(f"{BASE_TEST_URL}/api/download", download_response)
+    page.add_init_script("window.setInterval = () => 0;")
+    try:
+        page.goto(f"{BASE_TEST_URL}/")
+        page.locator(".btn-map-provider").click()
+        expect(page.locator("#modal-map-provider")).to_have_class("modal-backdrop open")
+        page.locator("#input-new-provider-name").fill("Example")
+        page.locator("#btn-submit-new-provider").click()
+        expect(page.locator("#modal-map-provider")).not_to_have_class("modal-backdrop open")
+        assert settings["providers"][0]["patterns"] == ["*example.com*"]
+
+        # A fresh queue response supplies providers to the mapping controller.
+        page.locator(".btn-map-provider").click()
+        expect(page.locator("#select-existing-provider option")).to_have_text("Example (limit: 1)")
+        page.keyboard.press("Escape")
+        expect(page.locator("#modal-map-provider")).not_to_have_class("modal-backdrop open")
+
+        page.locator("#btn-open-settings").click()
+        expect(page.locator(".provider-name-input")).to_have_value("Example")
+        page.locator("#setting-folder").fill("updated-downloads")
+        page.locator('#form-settings button[type="submit"]').click()
+        expect(page.locator("#modal-settings")).not_to_have_class("modal-backdrop open")
+        assert settings["download_dir"] == "updated-downloads"
+
+        page.locator('.tab-btn[data-filter="completed"]').click()
+        expect(page.locator(".task-item")).to_have_count(0)
+        page.locator('.tab-btn[data-filter="all"]').click()
+        expect(page.locator(".task-item")).to_have_count(1)
+        page.locator("#input-url").fill("https://example.com/new.mp4")
+        page.locator('#form-download button[type="submit"]').click()
+        expect(page.locator("#input-url")).to_have_value("")
+        assert downloads == [{"url": "https://example.com/new.mp4", "quality": "best", "format": "mp4"}]
     finally:
         page.close()
