@@ -37,3 +37,18 @@ export function showToast(message, type = 'info') {
   }, 3500);
 }
 
+
+// FastAPI validation bodies may contain captured inputs; display only safe messages.
+export function apiError(body, fallback) {
+  if (!body || typeof body !== 'object') return fallback;
+  if (typeof body.error === 'string') return body.error;
+  if (typeof body.detail === 'string') return body.detail;
+  if (Array.isArray(body.detail)) {
+    const messages = body.detail.filter(item => item && typeof item.msg === 'string').map(item => {
+      const location = Array.isArray(item.loc) ? item.loc.filter(part => typeof part === 'string' || typeof part === 'number').filter(part => part !== 'body').join('.') : '';
+      return location ? `${location}: ${item.msg}` : item.msg;
+    });
+    return messages.length ? messages.join('; ') : fallback;
+  }
+  return fallback;
+}

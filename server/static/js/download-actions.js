@@ -1,3 +1,4 @@
+import { apiError } from './ui.js';
 import { showToast } from './ui.js';
 
 export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilter }) {
@@ -19,7 +20,7 @@ export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilt
       try {
         const res = await fetch(`/api/clear/${encodeURIComponent(clearBtn.dataset.id)}`, { method: 'POST' });
         const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to clear task');
+        if (!res.ok || !json.success) throw new Error(apiError(json, 'Failed to clear task'));
         showToast('Task cleared', 'info');
         fetchQueue();
       } catch (err) {
@@ -36,7 +37,7 @@ export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilt
       try {
         const res = await fetch(`/api/${action}/${encodeURIComponent(controlBtn.dataset.id)}`, { method: 'POST' });
         const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || `Failed to ${action} download`);
+        if (!res.ok || !json.success) throw new Error(apiError(json, `Failed to ${action} download`));
         showToast(action === 'pause' ? 'Pause requested' : 'Resume requested', 'info');
         fetchQueue();
       } catch (err) {
@@ -69,7 +70,7 @@ export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilt
         const res = await fetch(`/api/open-file/${id}`, { method: 'POST' });
         const json = await res.json();
         if (!json.success) {
-          showToast(json.error || 'Could not open file', 'error');
+          showToast(apiError(json, 'Could not open file'), 'error');
         }
       } catch (err) {
         showToast('Failed to open file', 'error');
@@ -109,7 +110,7 @@ export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilt
         inputUrl.value = '';
         fetchQueue();
       } else {
-        showToast(data.error || 'Failed to queue download', 'error');
+        showToast(apiError(data, 'Failed to queue download'), 'error');
       }
     } catch (err) {
       showToast('Error connecting to server', 'error');
@@ -124,7 +125,7 @@ export function initDownloadActions({ refresh: fetchQueue, openMapModal, setFilt
       if (data.success) {
         showToast('Opened downloads folder', 'info');
       } else {
-        showToast(data.error || 'Could not open folder', 'error');
+        showToast(apiError(data, 'Could not open folder'), 'error');
       }
     } catch (e) {
       showToast('Error communicating with server', 'error');

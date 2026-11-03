@@ -280,9 +280,25 @@ function formatStreamLabel(stream, configuredProviders = []) {
   }
 }
 
+// Display validation messages without echoing captured URLs, cookies, or raw inputs.
+function apiErrorMessage(data, fallback) {
+  if (data && typeof data.error === "string") return data.error;
+  if (data && typeof data.detail === "string") return data.detail;
+  if (data && Array.isArray(data.detail)) {
+    const messages = data.detail.filter(item => item && typeof item.msg === "string").map(item => {
+      const location = Array.isArray(item.loc) ? item.loc.filter(part => typeof part === "string" || typeof part === "number").filter(part => part !== "body").join(".") : "";
+      return location ? `${location}: ${item.msg}` : item.msg;
+    });
+    return messages.length ? messages.join("; ") : fallback;
+  }
+  if (data && typeof data.message === "string") return data.message;
+  return fallback;
+}
+
 // Global exposure for browser contexts (ServiceWorker / Window)
 if (typeof globalThis !== "undefined") {
   globalThis.StreamDLUtils = {
+    apiErrorMessage,
     DEFAULT_SERVER_URL,
     getServerUrl,
     setServerUrl,
@@ -301,6 +317,7 @@ if (typeof globalThis !== "undefined") {
 // Node / CommonJS test environment export
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    apiErrorMessage,
     DEFAULT_SERVER_URL,
     getServerUrl,
     setServerUrl,

@@ -18,7 +18,7 @@ A modern, robust personal media archiving solution that captures video streams d
                            │ (with URL, Referer, Quality)
                            ▼
 ┌────────────────────────────────────────────────────────┐
-│               LOCAL PYTHON SERVER (Flask)              │
+│               LOCAL PYTHON SERVER (FastAPI)              │
 │                 http://localhost:7921                  │
 │  - REST API & Web Dashboard Host                       │
 │  - Configurable Concurrency Manager (e.g. 1-10 max)    │
@@ -67,7 +67,7 @@ We provide automated 1-click Windows batch scripts:
    ```powershell
    .\setup.bat
    ```
-   *This automatically creates the `.venv` virtual environment and installs `flask`, `flask-cors`, and `yt-dlp`.*
+   *This automatically creates the `.venv` virtual environment and installs `fastapi`, `uvicorn`, `pydantic`, `jinja2`, `httpx`, and `yt-dlp`.*
 
 2. **Start the Local Server**:
    Double-click `run_server.bat` or run:
@@ -152,13 +152,13 @@ Settings are saved in `settings.json`.
 ```
 video_dl/
 ├── .venv/                      # Python virtual environment
-├── requirements.txt            # Python dependencies (flask, flask-cors, yt-dlp)
+├── requirements.txt            # Python dependencies (FastAPI, Uvicorn, Pydantic, Jinja2, HTTPX, yt-dlp)
 ├── setup.bat                   # 1-click environment setup script
 ├── run_server.bat              # 1-click server launch script
 ├── run_server.py               # Server entry point
 ├── settings.json               # Persisted user settings
 │
-├── server/                     # Local Flask Server
+├── server/                     # Local FastAPI Server
 │   ├── app.py                  # REST API & static routes
 │   ├── config.py               # Settings loader & provider matcher
 │   ├── downloader.py           # Thread-safe queue dispatcher & public facade
@@ -171,7 +171,7 @@ video_dl/
 │   │   ├── css/style.css       # Modern dark glassmorphic dashboard CSS
 │   │   └── js/                 # Native ES modules (no build step)
 │   │       ├── app.js          # Dashboard initialization and wiring
-│   │       ├── queue.js        # Queue polling and refresh serialization
+│   │       ├── queue.js        # EventSource subscription and explicit refresh serialization
 │   │       ├── tasks-view.js   # Task rendering, filters, and DOM reconciliation
 │   │       ├── download-actions.js # Download forms and task controls
 │   │       ├── settings.js     # Settings and provider-list editor
@@ -213,7 +213,7 @@ video_dl/
 
 ## Testing
 
-StreamDL includes a comprehensive test suite covering the local Flask server, concurrency dispatcher, cancellation cleanup, and the browser extension.
+StreamDL includes a comprehensive test suite covering the local FastAPI server, concurrency dispatcher, cancellation cleanup, and the browser extension.
 
 Run the test suite using pytest:
 
@@ -247,3 +247,16 @@ For complete details, see the full [Privacy Policy](PRIVACY.md).
 
 This project is licensed under the [MIT License](LICENSE).
 
+
+
+## HTTP API and live queue
+
+The local server uses FastAPI (0.135 or later), Pydantic v2, explicit Jinja2 templates, and Uvicorn. The existing `run_server.py`, `run_server.bat`, and `setup.bat` entry points remain supported. Install dependencies with `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`.
+
+Open `/docs` for interactive OpenAPI documentation, `/redoc` for the reference, or `/openapi.json` for the machine-readable contract. Existing REST routes and the `/download` alias retain their success envelopes and domain-error responses. Invalid request fields now return FastAPI's standard HTTP 422 `detail` response. Settings updates are partial: omitted fields retain their saved values. Quality choices are `best`, `1080p`, `720p`, `480p`, and `audio`; formats are `mp4`, `mkv`, and `mp3`. Concurrency limits range from 1 to 10, ports from 1 to 65535, and TLS modes are `auto`, `strict`, and `permissive`. Legacy `tls_verify` and `check_certificate` settings are accepted.
+
+`GET /api/events` streams named `queue` SSE events whose JSON is identical to `GET /api/queue`. Each connection starts with a fresh snapshot, then receives changed snapshots sampled every 250 ms while clients are connected. Slow subscribers retain only the newest pending snapshot. Idle connections receive a comment heartbeat every 15 seconds, with a 3-second reconnect hint. Events have no history or replay IDs; reconnecting gets current state. Responses disable caching and proxy buffering.
+
+The dashboard maintains one EventSource, shows Connecting/Reconnecting/Connected, and keeps the last queue visible during disconnection. Action-triggered refreshes remain available; stale refresh responses cannot overwrite newer live events. The dashboard closes its subscription when leaving the page and restores it on return.
+
+Run one Uvicorn worker, with reload disabled, bound to `127.0.0.1`. Download state and subscribers are in memory and cannot be shared across workers. Manager startup belongs to application lifespan, so importing modules starts no threads. Shutdown blocks new dispatch/resume, requests pauses, and joins workers for at most five seconds total, retaining partial downloads. Unfinished workers are logged; queue state is not persisted across process restarts. Uvicorn also bounds graceful connection shutdown so an open SSE stream cannot prevent shutdown.

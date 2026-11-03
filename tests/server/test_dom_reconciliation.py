@@ -20,6 +20,17 @@ def browser_context():
 def test_dom_reconciliation_preserves_card_elements(browser_context):
     """Verify that renderTasks updates cards in place rather than destroying and recreating DOM nodes."""
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
 
@@ -118,6 +129,17 @@ def test_dom_reconciliation_preserves_card_elements(browser_context):
 def test_dom_reconciliation_task_lifecycle_and_delegation(browser_context):
     """Verify adding, completing, clearing tasks and delegated button actions."""
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
 
@@ -207,6 +229,17 @@ def test_dom_reconciliation_task_lifecycle_and_delegation(browser_context):
 @pytest.mark.parametrize('selector', ['.task-title', '.task-url', '.task-metrics', '.task-error-text'])
 def test_selection_survives_queue_refresh(browser_context, selector):
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
     task = {
         'id': 'selected-task',
         'title': 'A title to copy',
@@ -270,6 +303,17 @@ def test_clear_individual_task(browser_context, status):
     from playwright.sync_api import expect
 
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
     tasks = [
         {"id": "target", "title": "Finished", "status": status, "progress": 100},
         {"id": "other", "title": "Running", "status": "downloading", "progress": 25},
@@ -303,6 +347,17 @@ def test_pause_resume_dashboard_controls(browser_context):
     from playwright.sync_api import expect
 
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
     task = {
         "id": "pause-test", "title": "Pause Test", "url": "https://example.com/video.mp4",
         "quality": "best", "format": "mp4", "status": "downloading", "progress": 25,
@@ -345,6 +400,17 @@ def test_pause_control_survives_progress_refresh(browser_context, interaction):
     from playwright.sync_api import expect
 
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
     task = {
         "id": "stable-button", "title": "Running download", "url": "https://example.com/video.mp4",
         "status": "downloading", "progress": 10, "downloaded_str": "10MB", "total_str": "100MB",
@@ -402,6 +468,17 @@ def test_dashboard_settings_mapping_and_download_workflow(browser_context):
     from playwright.sync_api import expect
 
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
     settings = {"providers": [], "max_concurrent": 3, "download_dir": "test-downloads"}
     downloads = []
     task = {
@@ -460,5 +537,74 @@ def test_dashboard_settings_mapping_and_download_workflow(browser_context):
         page.locator('#form-download button[type="submit"]').click()
         expect(page.locator("#input-url")).to_have_value("")
         assert downloads == [{"url": "https://example.com/new.mp4", "quality": "best", "format": "mp4"}]
+    finally:
+        page.close()
+
+
+def test_sse_status_reconnect_lifecycle_and_stale_refresh(browser_context):
+    page = browser_context.new_page()
+    page.route('**/*', lambda route: route.abort())
+    page.route(f'{BASE_TEST_URL}/', lambda route: route.fulfill(content_type='text/html', body=INDEX_HTML_PATH.read_text(encoding='utf-8')))
+    page.route(f'{BASE_TEST_URL}/static/js/*.js', lambda route: route.fulfill(content_type='application/javascript', body=(APP_JS_PATH.parent / route.request.url.rsplit('/', 1)[-1]).read_text(encoding='utf-8')))
+    page.add_init_script("""
+        window.__sources = [];
+        window.EventSource = class {
+            constructor(url) { this.handlers = {}; this.closed = false; window.__sources.push(this); }
+            addEventListener(name, callback) { this.handlers[name] = callback; }
+            close() { this.closed = true; }
+        };
+        window.__emit = data => window.__sources.at(-1).handlers.queue({data: JSON.stringify(data)});
+        window.__refreshes = 0;
+        window.fetch = () => {
+            window.__refreshes++;
+            return new Promise(resolve => window.__resolveRefresh = data => resolve({ok:true, json:async () => data}));
+        };
+    """)
+    try:
+        page.goto(BASE_TEST_URL)
+        page.wait_for_function('window.__sources.length === 1')
+        assert page.locator('#server-status-text').inner_text() == 'Connecting'
+        assert page.evaluate('window.__refreshes') == 0
+        page.evaluate("window.__emit({tasks:[], providers:[]})")
+        assert page.locator('#server-status-text').inner_text() == 'Connected'
+        page.evaluate("window.__sources[0].onerror()")
+        assert page.locator('#server-status-text').inner_text() == 'Reconnecting'
+        page.evaluate("window.__testFetchQueue(); window.__emit({tasks:[{id:'fresh',title:'Fresh SSE',status:'queued'}],providers:[]}); window.__resolveRefresh({tasks:[],providers:[]})")
+        page.wait_for_selector('.task-item[data-id="fresh"]')
+        assert page.locator('#server-status-text').inner_text() == 'Connected'
+        assert page.locator('.task-item').count() == 1
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide'))")
+        assert page.evaluate('window.__sources[0].closed')
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow'))")
+        assert page.evaluate('window.__sources.length') == 2
+        assert page.locator('#server-status-text').inner_text() == 'Reconnecting'
+        page.evaluate("window.__sources[1].handlers.queue({data:'invalid'})")
+        assert page.locator('#server-status-text').inner_text() == 'Reconnecting'
+        assert page.locator('.task-item').count() == 1
+        page.evaluate("window.__emit({tasks:[],providers:[]})")
+        assert page.locator('#server-status-text').inner_text() == 'Connected'
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("body,expected", [
+    (None, "Fallback"),
+    ({"error": "Domain error"}, "Domain error"),
+    ({"detail": "Request error"}, "Request error"),
+    ({"detail": [{"loc": ["body", "providers", 0, "name"], "msg": "Required", "input": "secret", "ctx": {"secret": "hidden"}}]}, "providers.0.name: Required"),
+])
+def test_dashboard_validation_errors_exclude_inputs(browser_context, body, expected):
+    page = browser_context.new_page()
+    page.route('**/*', lambda route: route.abort())
+    page.route(f'{BASE_TEST_URL}/', lambda route: route.fulfill(content_type='text/html', body='<html></html>'))
+    page.route(f'{BASE_TEST_URL}/static/js/ui.js', lambda route: route.fulfill(content_type='application/javascript', body=(APP_JS_PATH.parent / 'ui.js').read_text(encoding='utf-8')))
+    try:
+        page.goto(BASE_TEST_URL)
+        result = page.evaluate("""async body => {
+            const {apiError} = await import('/static/js/ui.js');
+            return apiError(body, 'Fallback');
+        }""", body)
+        assert result == expected
+        assert 'secret' not in result
     finally:
         page.close()

@@ -151,7 +151,7 @@ def test_api_download_headers_propagation(client, manager):
     }
     res = client.post("/api/download", json=payload)
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     task_id = data["task"]["id"]
 
@@ -171,7 +171,7 @@ def test_api_download_referer_fallback(client, manager):
     }
     res = client.post("/api/download", json=payload)
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     task_id = data["task"]["id"]
 

@@ -1,3 +1,4 @@
+import { apiError } from './ui.js';
 import { showToast } from './ui.js';
 
 export function initProviderMapping({ refresh: fetchQueue }) {
@@ -121,7 +122,7 @@ export function initProviderMapping({ refresh: fetchQueue }) {
           closeMapModal();
           fetchQueue();
         } else {
-          showToast('Failed to update provider', 'error');
+          showToast(apiError(saveData, 'Failed to update provider'), 'error');
         }
       } catch (err) {
         console.error(err);
@@ -179,7 +180,7 @@ export function initProviderMapping({ refresh: fetchQueue }) {
           closeMapModal();
           fetchQueue();
         } else {
-          showToast('Failed to create provider', 'error');
+          showToast(apiError(saveData, 'Failed to create provider'), 'error');
         }
       } catch (err) {
         console.error(err);

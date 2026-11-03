@@ -28,6 +28,8 @@ function initApp() {
   // Retain the existing browser-test refresh hook.
   window.__testFetchQueue = queue.refresh;
   queue.start();
+  window.addEventListener('pagehide', () => queue.stop());
+  window.addEventListener('pageshow', () => queue.start());
 }
 
 if (document.readyState === 'loading') {

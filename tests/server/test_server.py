@@ -11,7 +11,7 @@ from server.utils import is_generic_title, sanitize_filename
 def test_status_endpoint(client):
     res = client.get("/api/status")
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["status"] == "online"
     assert "max_concurrent" in data
     assert "download_dir" in data
@@ -27,11 +27,11 @@ def test_settings_get_and_post(client):
     }
     res = client.post(
         "/api/settings",
-        data=json.dumps(new_settings),
-        content_type="application/json"
+        content=json.dumps(new_settings),
+        headers={"Content-Type": "application/json"}
     )
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     assert data["settings"]["max_concurrent"] == 4
     assert data["settings"]["default_quality"] == "720p"
@@ -39,31 +39,31 @@ def test_settings_get_and_post(client):
     # Verify GET settings returns updated values
     res_get = client.get("/api/settings")
     assert res_get.status_code == 200
-    assert res_get.get_json()["settings"]["max_concurrent"] == 4
+    assert res_get.json()["settings"]["max_concurrent"] == 4
 
 
 def test_download_endpoint_validation(client):
     # Missing url
     res = client.post(
         "/api/download",
-        data=json.dumps({}),
-        content_type="application/json"
+        content=json.dumps({}),
+        headers={"Content-Type": "application/json"}
     )
-    assert res.status_code == 400
+    assert res.status_code == 422
 
     # Valid url queuing
     res = client.post(
         "/api/download",
-        data=json.dumps({
+        content=json.dumps({
             "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
             "title": "Big Buck Bunny HLS",
             "quality": "720p",
             "format": "mp4"
         }),
-        content_type="application/json"
+        headers={"Content-Type": "application/json"}
     )
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     assert data["task"]["title"] == "Big Buck Bunny HLS"
     task_id = data["task"]["id"]
@@ -71,7 +71,7 @@ def test_download_endpoint_validation(client):
     # Check queue
     res_queue = client.get("/api/queue")
     assert res_queue.status_code == 200
-    q_data = res_queue.get_json()
+    q_data = res_queue.json()
     assert len(q_data["tasks"]) == 1
     assert q_data["tasks"][0]["id"] == task_id
 
@@ -85,7 +85,7 @@ def test_cancellation(client, manager):
 
     res = client.post(f"/api/cancel/{task.id}")
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
 
     updated = manager.get_task(task.id)
@@ -120,8 +120,8 @@ def test_clear_one_finished_task(client, manager, tmp_path, monkeypatch, status)
     response = client.post(f"/api/clear/{task.id}")
 
     assert response.status_code == 200
-    assert response.get_json()["success"] is True
-    assert [item["id"] for item in client.get("/api/queue").get_json()["tasks"]] == [other.id]
+    assert response.json()["success"] is True
+    assert [item["id"] for item in client.get("/api/queue").json()["tasks"]] == [other.id]
     assert manager.task_order == [other.id]
     assert manager._reserved_names == {other.id: "other"}
     assert output.read_bytes() == b"downloaded video"
@@ -139,7 +139,7 @@ def test_clear_task_rejects_unfinished_or_missing(client, manager, monkeypatch, 
             manager.task_order.append(task.id)
     response = client.post(f"/api/clear/{task.id}")
     assert response.status_code == 409
-    assert response.get_json()["success"] is False
+    assert response.json()["success"] is False
     assert (task.id in manager.tasks) == (status is not None)
 
 
@@ -173,7 +173,7 @@ def test_queue_endpoint_returns_providers_and_rematches(client, manager):
 
     res = client.get("/api/queue")
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert "providers" in data
     assert len(data["tasks"]) == 1
     assert data["tasks"][0]["provider_id"] == "r66nv9ed.com"
@@ -189,8 +189,8 @@ def test_queue_endpoint_returns_providers_and_rematches(client, manager):
     })
     res_post = client.post(
         "/api/settings",
-        data=json.dumps(current_settings),
-        content_type="application/json"
+        content=json.dumps(current_settings),
+        headers={"Content-Type": "application/json"}
     )
     assert res_post.status_code == 200
 
@@ -203,13 +203,13 @@ def test_queue_endpoint_returns_providers_and_rematches(client, manager):
 def test_index_page(client):
     res = client.get("/")
     assert res.status_code == 200
-    assert b"Video Stream Downloader" in res.data or b"settings" in res.data
+    assert b"Video Stream Downloader" in res.content or b"settings" in res.content
 
 
 def test_cancel_nonexistent_task_404(client):
     res = client.post("/api/cancel/nonexistent-task-id-12345")
     assert res.status_code == 404
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert "error" in data
 
@@ -225,7 +225,7 @@ def test_open_folder_success(client, monkeypatch, tmp_path):
 
     res = client.post("/api/open-folder")
     assert res.status_code == 200
-    assert res.get_json()["success"] is True
+    assert res.json()["success"] is True
     assert len(opened) == 1
 
 
@@ -233,7 +233,7 @@ def test_open_folder_not_found(client, monkeypatch):
     monkeypatch.setattr("os.path.exists", lambda p: False)
     res_missing = client.post("/api/open-folder")
     assert res_missing.status_code == 404
-    assert res_missing.get_json()["success"] is False
+    assert res_missing.json()["success"] is False
 
 
 def test_open_folder_error(client, monkeypatch, tmp_path):
@@ -248,7 +248,7 @@ def test_open_folder_error(client, monkeypatch, tmp_path):
 
     res_err = client.post("/api/open-folder")
     assert res_err.status_code == 500
-    assert res_err.get_json()["success"] is False
+    assert res_err.json()["success"] is False
 
 
 def test_open_file_endpoints(client, manager, monkeypatch, tmp_path, isolated_env):
@@ -259,20 +259,20 @@ def test_open_file_endpoints(client, manager, monkeypatch, tmp_path, isolated_en
     # 1. Nonexistent task ID -> 404
     res = client.post("/api/open-file/ghost_task_9999")
     assert res.status_code == 404
-    assert "Filepath not recorded" in res.get_json()["error"]
+    assert "Filepath not recorded" in res.json()["error"]
 
     # 2. Task with no filepath recorded -> 404
     task_nofile = manager.add_task(url="https://example.com/no_file")
     res_nofile = client.post(f"/api/open-file/{task_nofile.id}")
     assert res_nofile.status_code == 404
-    assert "Filepath not recorded" in res_nofile.get_json()["error"]
+    assert "Filepath not recorded" in res_nofile.json()["error"]
 
     # 3. File recorded but missing on disk -> 404
     task_missing = manager.add_task(url="https://example.com/missing")
     task_missing.filepath = str(isolated_env["download_dir"] / "missing_video.mp4")
     res_missing = client.post(f"/api/open-file/{task_missing.id}")
     assert res_missing.status_code == 404
-    assert "File does not exist" in res_missing.get_json()["error"]
+    assert "File does not exist" in res_missing.json()["error"]
 
     # 4. File recorded and exists on disk -> 200
     real_file = isolated_env["download_dir"] / "real_video.mp4"
@@ -281,7 +281,7 @@ def test_open_file_endpoints(client, manager, monkeypatch, tmp_path, isolated_en
     task_ok.filepath = str(real_file)
     res_ok = client.post(f"/api/open-file/{task_ok.id}")
     assert res_ok.status_code == 200
-    assert res_ok.get_json()["success"] is True
+    assert res_ok.json()["success"] is True
     assert len(opened) == 1
 
     # 5. Exception during opening -> 500
@@ -292,5 +292,5 @@ def test_open_file_endpoints(client, manager, monkeypatch, tmp_path, isolated_en
 
     res_err = client.post(f"/api/open-file/{task_ok.id}")
     assert res_err.status_code == 500
-    assert res_err.get_json()["success"] is False
+    assert res_err.json()["success"] is False
 
