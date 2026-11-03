@@ -199,6 +199,24 @@ class DownloadManager:
         cleanup_task_files(task)
         return True
 
+    def _remove_finished_task_locked(self, task_id: str) -> None:
+        task = self.tasks[task_id]
+        if task.status == "cancelled":
+            cleanup_task_files(task)
+        del self.tasks[task_id]
+        self._reserved_names.pop(task_id, None)
+        if task_id in self.task_order:
+            self.task_order.remove(task_id)
+
+    def clear_task(self, task_id: str) -> bool:
+        """Remove one finished task using the same cleanup rules as bulk clearing."""
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if not task or task.status not in {"completed", "failed", "cancelled"}:
+                return False
+            self._remove_finished_task_locked(task_id)
+        return True
+
     def clear_finished(self):
         with self._lock:
             to_remove = [
@@ -206,13 +224,7 @@ class DownloadManager:
                 if t.status in ["completed", "failed", "cancelled"]
             ]
             for tid in to_remove:
-                t = self.tasks[tid]
-                if t.status == "cancelled":
-                    cleanup_task_files(t)
-                del self.tasks[tid]
-                self._reserved_names.pop(tid, None)
-                if tid in self.task_order:
-                    self.task_order.remove(tid)
+                self._remove_finished_task_locked(tid)
         logger.info(f"Cleared {len(to_remove)} finished tasks.")
 
     def get_all_tasks(self) -> list[dict]:

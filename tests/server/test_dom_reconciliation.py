@@ -267,6 +267,40 @@ def test_selection_survives_queue_refresh(browser_context, selector):
         page.close()
 
 
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_clear_individual_task(browser_context, status):
+    from playwright.sync_api import expect
+
+    page = browser_context.new_page()
+    tasks = [
+        {"id": "target", "title": "Finished", "status": status, "progress": 100},
+        {"id": "other", "title": "Running", "status": "downloading", "progress": 25},
+    ]
+    requests = []
+    page.route("**/*", lambda route: route.abort())
+    page.route(f"{BASE_TEST_URL}/", lambda route: route.fulfill(
+        content_type="text/html", body=INDEX_HTML_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/static/js/app.js", lambda route: route.fulfill(
+        content_type="application/javascript", body=APP_JS_PATH.read_text(encoding="utf-8")))
+    page.route(f"{BASE_TEST_URL}/api/queue", lambda route: route.fulfill(json={"tasks": tasks}))
+
+    def clear(route):
+        requests.append((route.request.url, route.request.method))
+        tasks.pop(0)
+        route.fulfill(json={"success": True})
+
+    page.route(f"{BASE_TEST_URL}/api/clear/target", clear)
+    try:
+        page.goto(f"{BASE_TEST_URL}/")
+        expect(page.locator('[data-id="other"] .btn-clear-task')).to_have_count(0)
+        page.get_by_role("button", name="Clear task", exact=True).click()
+        expect(page.locator('.task-item[data-id="target"]')).to_have_count(0)
+        expect(page.locator('.task-item[data-id="other"]')).to_be_visible()
+        assert requests == [(f"{BASE_TEST_URL}/api/clear/target", "POST")]
+    finally:
+        page.close()
+
+
 def test_pause_resume_dashboard_controls(browser_context):
     from playwright.sync_api import expect
 

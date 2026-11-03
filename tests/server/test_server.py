@@ -4,6 +4,7 @@ import pytest
 
 from server.config import load_settings, save_settings
 from server.resolvers import is_doodstream_url
+from server.task import DownloadTask
 from server.utils import is_generic_title, sanitize_filename
 
 
@@ -98,6 +99,48 @@ def test_clear_finished(client, manager):
     res = client.post("/api/clear")
     assert res.status_code == 200
     assert len(manager.get_all_tasks()) == 0
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_clear_one_finished_task(client, manager, tmp_path, monkeypatch, status):
+    task = DownloadTask("target", "https://example.com/target.mp4")
+    task.status = status
+    other = DownloadTask("other", "https://example.com/other.mp4")
+    other.status = "paused"
+    output = tmp_path / "target.mp4"
+    output.write_bytes(b"downloaded video")
+    task.filepath = str(output)
+    cleaned = []
+    monkeypatch.setattr("server.downloader.cleanup_task_files", lambda task: cleaned.append(task.id))
+    with manager._lock:
+        manager.tasks.update({task.id: task, other.id: other})
+        manager.task_order.extend([task.id, other.id])
+        manager._reserved_names.update({task.id: "target", other.id: "other"})
+
+    response = client.post(f"/api/clear/{task.id}")
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert [item["id"] for item in client.get("/api/queue").get_json()["tasks"]] == [other.id]
+    assert manager.task_order == [other.id]
+    assert manager._reserved_names == {other.id: "other"}
+    assert output.read_bytes() == b"downloaded video"
+    assert cleaned == ([task.id] if status == "cancelled" else [])
+
+
+@pytest.mark.parametrize("status", ["queued", "downloading", "processing", "pausing", "paused", "resuming", None])
+def test_clear_task_rejects_unfinished_or_missing(client, manager, monkeypatch, status):
+    monkeypatch.setattr(manager, "_start_task_locked", lambda task: None)
+    task = DownloadTask("target", "https://example.com/target.mp4")
+    with manager._lock:
+        if status is not None:
+            task.status = status
+            manager.tasks[task.id] = task
+            manager.task_order.append(task.id)
+    response = client.post(f"/api/clear/{task.id}")
+    assert response.status_code == 409
+    assert response.get_json()["success"] is False
+    assert (task.id in manager.tasks) == (status is not None)
 
 
 def test_title_sanitization_and_generic_check():
