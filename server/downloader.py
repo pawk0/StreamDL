@@ -39,9 +39,34 @@ class DownloadManager:
         self._reserved_names: dict[str, str] = {}
         self._stop_dispatcher = False
 
-        # Start background queue dispatcher
-        self._dispatcher_thread = threading.Thread(target=self._dispatcher_loop, daemon=True)
-        self._dispatcher_thread.start()
+        self._dispatcher_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Start dispatching explicitly; construction never starts background work."""
+        with self._lock:
+            if self._dispatcher_thread and self._dispatcher_thread.is_alive():
+                return
+            self._stop_dispatcher = False
+            self._dispatcher_thread = threading.Thread(target=self._dispatcher_loop, daemon=True)
+            self._dispatcher_thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Pause work, preserving partial files, within one bounded join budget."""
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            self._stop_dispatcher = True
+            for task in self.tasks.values():
+                task.resume_requested = False
+                if task.status in {"queued", "downloading", "processing", "resuming", "pausing"}:
+                    task.pause_requested = True
+                    task.status = "pausing" if task.id in self._active_threads else "paused"
+            threads = list(self._active_threads.values())
+            if self._dispatcher_thread:
+                threads.append(self._dispatcher_thread)
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            logger.warning("Download shutdown timed out; partial files retained")
 
     @classmethod
     def get_instance(cls):
@@ -143,7 +168,7 @@ class DownloadManager:
     def resume_task(self, task_id: str) -> bool:
         with self._lock:
             task = self.tasks.get(task_id)
-            if not task or not task.pause_requested or task.resume_requested or task.cancel_requested:
+            if self._stop_dispatcher or not task or not task.pause_requested or task.resume_requested or task.cancel_requested:
                 return False
             if task.status in {"completed", "failed", "cancelled"}:
                 return False
@@ -260,10 +285,14 @@ class DownloadManager:
     def _dispatcher_loop(self):
         while not self._stop_dispatcher:
             time.sleep(0.5)
+            if self._stop_dispatcher:
+                break
             settings = load_settings()
             max_concurrent = settings.get("max_concurrent", 3)
 
             with self._lock:
+                if self._stop_dispatcher:
+                    break
                 # Clean up finished threads
                 finished_tids = [tid for tid, th in self._active_threads.items() if not th.is_alive()]
                 for tid in finished_tids:
@@ -319,5 +348,5 @@ class DownloadManager:
                     self._reserved_names.pop(task.id, None)
                 elif task.pause_requested and task.status != "completed":
                     task.status = "paused"
-                    if task.resume_requested:
+                    if task.resume_requested and not self._stop_dispatcher:
                         self._start_task_locked(task)

@@ -30,7 +30,7 @@ def test_open_file_path_traversal_blocked(client, manager, isolated_env, monkeyp
 
     res = client.post(f"/api/open-file/{task.id}")
     assert res.status_code == 403
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert "outside download directory" in data["error"].lower()
     assert len(opened) == 0
@@ -59,7 +59,7 @@ def test_open_file_unsafe_extension_blocked(client, manager, isolated_env, monke
 
     res = client.post(f"/api/open-file/{task.id}")
     assert res.status_code == 403
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert "unsafe file extension" in data["error"].lower()
     assert len(opened) == 0
@@ -77,7 +77,7 @@ def test_open_file_directory_target_rejected(client, manager, isolated_env, monk
 
     res = client.post(f"/api/open-file/{task.id}")
     assert res.status_code in [400, 403]
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert len(opened) == 0
 
@@ -103,7 +103,7 @@ def test_open_file_safe_media_allowed(client, manager, isolated_env, monkeypatch
 
     res = client.post(f"/api/open-file/{task.id}")
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     assert len(opened) == 1
     assert Path(opened[0]).resolve() == media_file.resolve()
@@ -119,7 +119,7 @@ def test_open_folder_traversal_blocked(client, isolated_env, monkeypatch):
         json={"folder": "../../.."},
     )
     assert res.status_code == 403
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert "outside download directory" in data["error"].lower()
     assert len(opened) == 0
@@ -138,7 +138,7 @@ def test_open_folder_file_target_rejected(client, isolated_env, monkeypatch):
         json={"folder": "test_file.txt"},
     )
     assert res.status_code == 400
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is False
     assert "not a directory" in data["error"].lower()
     assert len(opened) == 0
@@ -157,7 +157,7 @@ def test_open_folder_subfolder_success(client, isolated_env, monkeypatch):
         json={"folder": "season1"},
     )
     assert res.status_code == 200
-    data = res.get_json()
+    data = res.json()
     assert data["success"] is True
     assert len(opened) == 1
     assert Path(opened[0]).resolve() == sub.resolve()

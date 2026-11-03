@@ -1,3 +1,4 @@
+import { apiError } from './ui.js';
 import { escapeHtml, showToast } from './ui.js';
 
 export function initSettings({ refresh: fetchQueue }) {
@@ -177,7 +178,7 @@ export function initSettings({ refresh: fetchQueue }) {
         closeModal();
         fetchQueue();
       } else {
-        showToast('Failed to save settings', 'error');
+        showToast(apiError(data, 'Failed to save settings'), 'error');
       }
     } catch (e) {
       showToast('Error saving settings', 'error');

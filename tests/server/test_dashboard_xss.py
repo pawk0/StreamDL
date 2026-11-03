@@ -19,6 +19,17 @@ def browser_context():
 
 def test_dashboard_xss_sanitization(browser_context):
     page = browser_context.new_page()
+    page.route("https://**/*", lambda route: route.abort())
+    page.add_init_script("""
+        window.__eventSources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; this.closed = false; window.__eventSources.push(this); }
+            addEventListener(name, callback) {
+                if (name === 'queue') fetch('/api/queue').then(r => r.json()).then(data => callback({ data: JSON.stringify({ providers: [], ...data }) }));
+            }
+            close() { this.closed = true; }
+        };
+    """)
 
     html_content = INDEX_HTML_PATH.read_text(encoding="utf-8")
 

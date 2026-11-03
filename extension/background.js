@@ -326,11 +326,7 @@ async function sendDownloadRequest({ url, title, referer, headers: customHeaders
   }
 
   if (!res.ok) {
-    const serverErrMsg = data && (data.error || data.message);
-    if (serverErrMsg) {
-      throw new Error(serverErrMsg);
-    }
-    throw new Error(`Server returned status ${res.status}`);
+    throw new Error(StreamDLUtils.apiErrorMessage(data, `Server returned status ${res.status}`));
   }
 
   return data;

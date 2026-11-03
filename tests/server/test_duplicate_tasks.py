@@ -84,20 +84,20 @@ def test_same_name_same_url_rejected(manager, client):
     # Enqueue first task
     res1 = client.post(
         "/api/download",
-        data=json.dumps({"url": url, "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": url, "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res1.status_code == 200
-    assert res1.get_json()["success"] is True
+    assert res1.json()["success"] is True
 
     # Enqueue duplicate task with same name and same URL -> 409 Conflict
     res2 = client.post(
         "/api/download",
-        data=json.dumps({"url": url, "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": url, "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res2.status_code == 409
-    data2 = res2.get_json()
+    data2 = res2.json()
     assert data2["success"] is False
     assert "already queued or downloading" in data2["error"]
 
@@ -112,18 +112,18 @@ def test_generic_title_same_url_rejected(manager, client):
 
     res1 = client.post(
         "/api/download",
-        data=json.dumps({"url": url}),
-        content_type="application/json"
+        content=json.dumps({"url": url}),
+        headers={"Content-Type": "application/json"}
     )
     assert res1.status_code == 200
 
     res2 = client.post(
         "/api/download",
-        data=json.dumps({"url": url}),
-        content_type="application/json"
+        content=json.dumps({"url": url}),
+        headers={"Content-Type": "application/json"}
     )
     assert res2.status_code == 409
-    assert "already queued or downloading" in res2.get_json()["error"]
+    assert "already queued or downloading" in res2.json()["error"]
 
 
 def test_same_name_different_url_disambiguated(manager, client):
@@ -136,21 +136,21 @@ def test_same_name_different_url_disambiguated(manager, client):
     # Second task with different URL is renamed to "Shared Title (1)"
     res2 = client.post(
         "/api/download",
-        data=json.dumps({"url": "https://example.com/video2", "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": "https://example.com/video2", "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res2.status_code == 200
-    data2 = res2.get_json()
+    data2 = res2.json()
     assert data2["task"]["title"] == "Shared Title (1)"
 
     # Third task with another different URL is renamed to "Shared Title (2)"
     res3 = client.post(
         "/api/download",
-        data=json.dumps({"url": "https://example.com/video3", "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": "https://example.com/video3", "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res3.status_code == 200
-    data3 = res3.get_json()
+    data3 = res3.json()
     assert data3["task"]["title"] == "Shared Title (2)"
 
 
@@ -609,46 +609,46 @@ def test_clear_finished_preserves_active_task_reservations(manager):
         manager.add_task(url="https://example.com/active", title="Active Task")
 
 
-def test_download_api_endpoints_409_and_400(client):
+def test_download_api_endpoints_409_and_422(client):
     """
     Both /api/download and /download endpoints must return 409 on duplicates
-    and 400 on missing/empty URL parameter.
+    and 422 on missing/empty URL parameter.
     """
     url = "https://example.com/api_test_clip"
     title = "API Test Video"
 
-    # 1. Missing URL -> 400 Bad Request
-    res_bad1 = client.post("/api/download", data=json.dumps({}), content_type="application/json")
-    assert res_bad1.status_code == 400
+    # 1. Missing URL -> 422 Bad Request
+    res_bad1 = client.post("/api/download", content=json.dumps({}), headers={"Content-Type": "application/json"})
+    assert res_bad1.status_code == 422
 
-    res_bad2 = client.post("/download", data=json.dumps({"url": "   "}), content_type="application/json")
-    assert res_bad2.status_code == 400
+    res_bad2 = client.post("/download", content=json.dumps({"url": "   "}), headers={"Content-Type": "application/json"})
+    assert res_bad2.status_code == 422
 
     # 2. First enqueue via /download
     res1 = client.post(
         "/download",
-        data=json.dumps({"url": url, "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": url, "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res1.status_code == 200
 
     # 3. Duplicate enqueue via /download -> 409 Conflict
     res2 = client.post(
         "/download",
-        data=json.dumps({"url": url, "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": url, "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res2.status_code == 409
-    assert res2.get_json()["success"] is False
+    assert res2.json()["success"] is False
 
     # 4. Duplicate enqueue via /api/download -> 409 Conflict
     res3 = client.post(
         "/api/download",
-        data=json.dumps({"url": url, "title": title}),
-        content_type="application/json"
+        content=json.dumps({"url": url, "title": title}),
+        headers={"Content-Type": "application/json"}
     )
     assert res3.status_code == 409
-    assert res3.get_json()["success"] is False
+    assert res3.json()["success"] is False
 
 
 def test_get_unique_base_with_nonexistent_or_none_download_dir():

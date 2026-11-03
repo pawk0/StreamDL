@@ -1,19 +1,21 @@
 import json
+import time
 
 import pytest
+from fastapi.testclient import TestClient
 
-from server.app import app
+from server.app import create_app
 from server.config import DEFAULT_PROVIDERS, DEFAULT_SETTINGS
 from server.downloader import DownloadManager
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(tmp_path, monkeypatch):
+def isolated_env(tmp_path, monkeypatch, request):
     """
     Autouse fixture that runs for every test:
     1. Creates an isolated temporary settings.json and download folder.
     2. Sets VIDEO_DL_SETTINGS_FILE and VIDEO_DL_PORT (17921).
-    3. Resets DownloadManager state before and after each test.
+    3. Creates and shuts down a fresh manager for each test.
     4. Guarantees that production settings.json is never touched.
     """
     test_settings_file = tmp_path / "test_settings.json"
@@ -31,12 +33,15 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_DL_SETTINGS_FILE", str(test_settings_file))
     monkeypatch.setenv("VIDEO_DL_PORT", "17921")
 
-    manager = DownloadManager.get_instance()
-    with manager._lock:
-        manager.tasks.clear()
-        manager.task_order.clear()
-        manager._active_threads.clear()
-        manager._reserved_names.clear()
+    manager = DownloadManager()
+    monkeypatch.setattr(DownloadManager, "_instance", manager)
+    if "client" in request.fixturenames and request.node.get_closest_marker("live") is None:
+        def local_download(task):
+            task.status = "downloading"
+            while not task.pause_requested and not task.cancel_requested:
+                time.sleep(0.01)
+        monkeypatch.setattr("server.downloader.execute_download", local_download)
+    manager.start()
 
     yield {
         "settings_file": test_settings_file,
@@ -45,20 +50,17 @@ def isolated_env(tmp_path, monkeypatch):
         "manager": manager
     }
 
-    with manager._lock:
-        manager.tasks.clear()
-        manager.task_order.clear()
-        manager._active_threads.clear()
-        manager._reserved_names.clear()
+    manager.stop()
 
 
 @pytest.fixture
-def client():
-    """Provides a Flask test client."""
-    return app.test_client()
+def client(isolated_env):
+    """Run ASGI lifespan while isolated settings still exist."""
+    with TestClient(create_app(isolated_env["manager"])) as client:
+        yield client
 
 
 @pytest.fixture
-def manager():
+def manager(isolated_env):
     """Provides the DownloadManager singleton."""
     return DownloadManager.get_instance()

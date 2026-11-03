@@ -42,7 +42,7 @@ class DownloadTask:
         self.speed = "0 B/s"
         self.speed_raw = 0
         self.downloaded_bytes = 0
-        self.total_bytes = 0
+        self.total_bytes: int | float = 0
         self.eta = "--:--"
         self.error_message: str | None = None
         self.filepath: str | None = None

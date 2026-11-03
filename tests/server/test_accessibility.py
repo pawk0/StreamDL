@@ -19,7 +19,7 @@ def test_dashboard_buttons_have_aria_labels(client):
     """Ensure key icon and action buttons in index.html have aria-label attributes."""
     res = client.get("/")
     assert res.status_code == 200
-    html = res.get_data(as_text=True)
+    html = res.text
 
     parser = ButtonAttrParser()
     parser.feed(html)

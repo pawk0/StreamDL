@@ -280,3 +280,14 @@ def test_send_download_message_listener_error_propagation(extension_page):
 
     assert result["success"] is False
     assert custom_error in result["error"]
+
+
+@pytest.mark.parametrize("detail,expected", [("Invalid request", "Invalid request"), ([{"loc": ["body", "quality"], "msg": "Invalid", "input": "secret-cookie", "ctx": {"value": "secret-cookie"}}], "quality: Invalid")])
+def test_fastapi_error_detail_never_echoes_raw_inputs(extension_page, detail, expected):
+    extension_page.route("**/api/download", lambda route: route.fulfill(status=422, json={"detail": detail}))
+    result = extension_page.evaluate("""async () => {
+        try { await sendDownloadRequest({url:'https://example.com/stream'}); }
+        catch (error) { return error.message; }
+    }""")
+    assert result == expected
+    assert "secret-cookie" not in result

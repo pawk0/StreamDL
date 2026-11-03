@@ -12,7 +12,7 @@ def test_queue_and_concurrency_limit(manager, monkeypatch):
     def mock_execute(task: DownloadTask):
         executed_tasks.append(task.id)
         task.status = "downloading"
-        while not task.cancel_requested:
+        while not task.cancel_requested and not task.pause_requested:
             time.sleep(0.05)
         task.status = "cancelled"
 
@@ -77,7 +77,7 @@ def test_per_provider_concurrency_independent(manager, monkeypatch):
     def mock_execute(task: DownloadTask):
         executed_tasks.append(task.id)
         task.status = "downloading"
-        while not task.cancel_requested:
+        while not task.cancel_requested and not task.pause_requested:
             time.sleep(0.05)
         task.status = "cancelled"
 
@@ -124,7 +124,7 @@ def test_decrease_global_concurrency_below_active_downloads(manager, monkeypatch
     def mock_execute(task: DownloadTask):
         executed_tasks.append(task.id)
         task.status = "downloading"
-        while not task.cancel_requested and task.id not in completed_tasks:
+        while not task.cancel_requested and not task.pause_requested and task.id not in completed_tasks:
             time.sleep(0.05)
         if task.id in completed_tasks:
             task.status = "completed"
@@ -207,7 +207,7 @@ def test_decrease_provider_concurrency_below_active_downloads(manager, monkeypat
     def mock_execute(task: DownloadTask):
         executed_tasks.append(task.id)
         task.status = "downloading"
-        while not task.cancel_requested and task.id not in completed_tasks:
+        while not task.cancel_requested and not task.pause_requested and task.id not in completed_tasks:
             time.sleep(0.05)
         if task.id in completed_tasks:
             task.status = "completed"
