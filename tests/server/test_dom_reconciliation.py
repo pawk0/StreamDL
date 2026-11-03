@@ -204,3 +204,64 @@ def test_dom_reconciliation_task_lifecycle_and_delegation(browser_context):
     assert any("task-done" in url for url in open_called)
 
     page.close()
+
+
+@pytest.mark.parametrize('selector', ['.task-title', '.task-url', '.task-metrics', '.task-error-text'])
+def test_selection_survives_queue_refresh(browser_context, selector):
+    page = browser_context.new_page()
+    task = {
+        'id': 'selected-task',
+        'title': 'A title to copy',
+        'url': 'https://example.com/video.mp4',
+        'status': 'failed' if selector == '.task-error-text' else 'downloading',
+        'error_message': 'An error to copy',
+        'progress': 10,
+        'downloaded_str': '10MB',
+    }
+    other_task = {**task, 'id': 'other-task', 'status': 'downloading'}
+    page.route('**/*', lambda route: route.abort())
+    page.route(
+        f'{BASE_TEST_URL}/',
+        lambda route: route.fulfill(content_type='text/html', body=INDEX_HTML_PATH.read_text(encoding='utf-8')),
+    )
+    page.route(
+        f'{BASE_TEST_URL}/static/js/app.js',
+        lambda route: route.fulfill(content_type='application/javascript', body=APP_JS_PATH.read_text(encoding='utf-8')),
+    )
+    page.route(
+        f'{BASE_TEST_URL}/api/queue',
+        lambda route: route.fulfill(json={'tasks': [task, other_task]}),
+    )
+    # Control refreshes explicitly to avoid timing-dependent assertions.
+    page.add_init_script('window.setInterval = () => 0;')
+    try:
+        page.goto(f'{BASE_TEST_URL}/')
+        page.wait_for_selector('.task-item')
+        selected_text = page.evaluate('''selector => {
+            const node = document.querySelector('.task-item ' + selector);
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return selection.toString();
+        }''', selector)
+        assert selected_text
+
+        # An unchanged poll must not move cards and destroy the selection.
+        page.evaluate('window.__testFetchQueue()')
+        assert page.evaluate('window.getSelection().toString()') == selected_text
+
+        task['progress'] = 85
+        task['downloaded_str'] = '85MB'
+        other_task['progress'] = 60
+        page.evaluate('window.__testFetchQueue()')
+        assert page.evaluate('window.getSelection().toString()') == selected_text
+        assert '60%' in page.locator('[data-id="other-task"] .progress-bar-fill').get_attribute('style')
+
+        # The selected card catches up on the first refresh after deselection.
+        page.evaluate('window.getSelection().removeAllRanges()')
+        page.evaluate('window.__testFetchQueue()')
+        assert '85%' in page.locator('[data-id="selected-task"] .progress-bar-fill').get_attribute('style')
+    finally:
+        page.close()

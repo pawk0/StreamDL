@@ -187,6 +187,8 @@ function initApp() {
     });
 
     let queuePositionCounter = 1;
+    let previousCard = null;
+    const selection = window.getSelection();
 
     tasks.forEach(task => {
       const taskId = String(task.id);
@@ -295,12 +297,22 @@ function initApp() {
         ${errorHtml}
       `;
 
-      if (card._lastHtml !== cardInnerHtml) {
+      // Keep selected text nodes alive until the user finishes copying.
+      const hasSelection = selection && !selection.isCollapsed
+        && selection.containsNode(card, true);
+      if (!hasSelection && card._lastHtml !== cardInnerHtml) {
         card.innerHTML = cardInnerHtml;
         card._lastHtml = cardInnerHtml;
       }
 
-      tasksContainer.appendChild(card);
+      // Re-inserting even an unchanged card clears the browser's selection.
+      const nextCard = previousCard
+        ? previousCard.nextElementSibling
+        : tasksContainer.querySelector('.task-item');
+      if (card !== nextCard) {
+        tasksContainer.insertBefore(card, nextCard);
+      }
+      previousCard = card;
     });
   }
 
