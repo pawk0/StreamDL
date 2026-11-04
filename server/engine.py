@@ -84,10 +84,10 @@ def build_ydl_options(
         "continuedl": True,
     }
     verbose = os.environ.get("VIDEO_DL_DEBUG", "").lower() in {"1", "true", "yes"}
-    ydl_opts["logger"] = YtdlpLogger(task.id, verbose=verbose)
+    ydl_opts["logger"] = YtdlpLogger(task.id)
     ydl_opts["verbose"] = verbose
     # Keep UI progress hooks active while avoiding a console line for each update.
-    ydl_opts["noprogress"] = not verbose
+    ydl_opts["noprogress"] = True
 
     # Format / Quality configuration
     q = task.quality.lower()
@@ -205,7 +205,7 @@ def execute_download(
     task.status = "downloading"
     task.started_at = task.started_at or time.time()
     logger.info("Starting download for task %s: %s", task.id, redact_url(task.url))
-    logger.info("Task %s captured headers: %s", task.id, summarize_headers(task.headers))
+    logger.debug("Task %s captured headers: %s", task.id, summarize_headers(task.headers))
 
     download_url = task.url
     download_headers = dict(task.headers)
@@ -296,7 +296,7 @@ def execute_download(
     )
 
     def _run_ydl(opts: dict[str, Any]) -> None:
-        logger.info("Task %s effective headers: %s; TLS mode=%s", task.id, summarize_headers(opts["http_headers"]), tls_mode)
+        logger.debug("Task %s effective headers: %s; TLS mode=%s", task.id, summarize_headers(opts["http_headers"]), tls_mode)
         with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
             # First extract info (without re-downloading if we can fetch title/thumbnail)
             try:

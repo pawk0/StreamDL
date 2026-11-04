@@ -107,7 +107,7 @@ def test_failed_download_diagnostics(media_server, tmp_path, caplog):
             "Referer": base + "/player?session=referer-secret", "X-Custom": "header-secret",
         },
     )
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG, logger="video_dl"):
         execute_download(task, str(tmp_path))
     assert task.status == "failed"
     assert "HTTP 403" in caplog.text
@@ -154,12 +154,25 @@ def test_unknown_header_values_are_redacted(name):
     assert summarize_headers({name: "secret"}) == {name: "<present>"}
 
 
-def test_verbose_logger_is_opt_in(caplog):
-    with caplog.at_level(logging.INFO):
-        YtdlpLogger("quiet").debug("[debug] hidden")
-        YtdlpLogger("verbose", verbose=True).debug("[debug] visible")
-    assert "hidden" not in caplog.text
-    assert "visible" in caplog.text
+@pytest.mark.parametrize("level", [logging.INFO, logging.DEBUG])
+@pytest.mark.parametrize("message", [
+    "[debug] transport details",
+    "[generic] Downloading m3u8 information",
+    "[http] HTTP 200 https://example.com/master.m3u8?t=secret",
+])
+def test_downloader_diagnostics_require_debug(caplog, level, message):
+    with caplog.at_level(level, logger="video_dl"):
+        YtdlpLogger("diagnostics").debug(message)
+    assert bool(caplog.records) == (level == logging.DEBUG)
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.parametrize("method, level", [("warning", logging.WARNING), ("error", logging.ERROR)])
+def test_downloader_problems_remain_visible(caplog, method, level):
+    with caplog.at_level(logging.INFO, logger="video_dl"):
+        getattr(YtdlpLogger("problem"), method)("HTTP failure")
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == level
 
 
 def test_transport_patch_is_idempotent():

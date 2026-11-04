@@ -8,7 +8,7 @@ import httpx
 import pytest
 import uvicorn
 
-from server.app import create_app
+from server.app import StreamDLServer, create_app
 from server.downloader import DownloadManager
 from server.events import QueuePublisher
 from server.models import SettingsPatch
@@ -183,6 +183,40 @@ def test_publisher_latest_only_idle_and_recovery():
     asyncio.run(scenario())
 
 
+def test_shutdown_during_subscription_snapshot():
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = threading.Event()
+
+        def snapshot():
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(5):
+                raise TimeoutError("Snapshot was not released")
+            return {"value": 1}
+
+        publisher = QueuePublisher(snapshot)
+        stream = publisher.stream()
+        pending = asyncio.create_task(anext(stream))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            await publisher.stop()
+            release.set()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(pending, timeout=2)
+            assert not publisher._subscribers
+            assert publisher._task is None
+            late = await publisher.subscribe()
+            assert late.get_nowait() is None
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await stream.aclose()
+            await publisher.stop()
+
+    asyncio.run(scenario())
+
+
 @pytest.fixture
 def streaming_server(isolated_env, monkeypatch):
     def local_download(task):
@@ -196,7 +230,7 @@ def streaming_server(isolated_env, monkeypatch):
     sock.bind(("127.0.0.1", 0))
     sock.listen()
     port = sock.getsockname()[1]
-    server = uvicorn.Server(
+    server = StreamDLServer(
         uvicorn.Config(
             app,
             host="127.0.0.1",
@@ -303,13 +337,15 @@ def test_queue_and_sse_accept_estimated_sizes(streaming_server, manager, total_b
             assert json.loads(data) == snapshot
 
 
-def test_uvicorn_shutdown_with_open_stream(streaming_server):
+def test_uvicorn_shutdown_with_open_stream(streaming_server, caplog):
     base, _, server, thread = streaming_server
     with httpx.stream("GET", base + "/api/events", timeout=3) as response:
         assert "event: queue" in next_event(response.iter_lines())
         server.should_exit = True
         thread.join(6)
         assert not thread.is_alive()
+    assert "timeout graceful shutdown exceeded" not in caplog.text
+    assert "Exception in ASGI application" not in caplog.text
 
 
 def test_shutdown_join_budget_preserves_partials(isolated_env, caplog):
