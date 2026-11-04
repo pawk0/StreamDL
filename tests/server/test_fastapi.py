@@ -183,6 +183,40 @@ def test_publisher_latest_only_idle_and_recovery():
     asyncio.run(scenario())
 
 
+def test_shutdown_during_subscription_snapshot():
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = threading.Event()
+
+        def snapshot():
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(5):
+                raise TimeoutError("Snapshot was not released")
+            return {"value": 1}
+
+        publisher = QueuePublisher(snapshot)
+        stream = publisher.stream()
+        pending = asyncio.create_task(anext(stream))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            await publisher.stop()
+            release.set()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(pending, timeout=2)
+            assert not publisher._subscribers
+            assert publisher._task is None
+            late = await publisher.subscribe()
+            assert late.get_nowait() is None
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await stream.aclose()
+            await publisher.stop()
+
+    asyncio.run(scenario())
+
+
 @pytest.fixture
 def streaming_server(isolated_env, monkeypatch):
     def local_download(task):

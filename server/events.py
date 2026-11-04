@@ -34,6 +34,11 @@ class QueuePublisher:
                 return queue
             # Serialize fresh subscription snapshots against ongoing publication.
             snapshot = await asyncio.to_thread(self.snapshot)
+            # Shutdown may finish while the snapshot runs in its worker thread.
+            # Do not register a queue or restart publication after that point.
+            if self._stopped:
+                queue.put_nowait(None)
+                return queue
             queue.put_nowait(snapshot)
             self._subscribers.add(queue)
             if self._task is None:
