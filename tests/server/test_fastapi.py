@@ -8,7 +8,7 @@ import httpx
 import pytest
 import uvicorn
 
-from server.app import create_app
+from server.app import StreamDLServer, create_app
 from server.downloader import DownloadManager
 from server.events import QueuePublisher
 from server.models import SettingsPatch
@@ -196,7 +196,7 @@ def streaming_server(isolated_env, monkeypatch):
     sock.bind(("127.0.0.1", 0))
     sock.listen()
     port = sock.getsockname()[1]
-    server = uvicorn.Server(
+    server = StreamDLServer(
         uvicorn.Config(
             app,
             host="127.0.0.1",
@@ -303,13 +303,15 @@ def test_queue_and_sse_accept_estimated_sizes(streaming_server, manager, total_b
             assert json.loads(data) == snapshot
 
 
-def test_uvicorn_shutdown_with_open_stream(streaming_server):
+def test_uvicorn_shutdown_with_open_stream(streaming_server, caplog):
     base, _, server, thread = streaming_server
     with httpx.stream("GET", base + "/api/events", timeout=3) as response:
         assert "event: queue" in next_event(response.iter_lines())
         server.should_exit = True
         thread.join(6)
         assert not thread.is_alive()
+    assert "timeout graceful shutdown exceeded" not in caplog.text
+    assert "Exception in ASGI application" not in caplog.text
 
 
 def test_shutdown_join_budget_preserves_partials(isolated_env, caplog):

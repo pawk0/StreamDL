@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 import uuid
@@ -17,6 +18,9 @@ from server.utils import (
 
 logger = logging.getLogger("video_dl.downloader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.getLogger("video_dl").setLevel(
+    logging.DEBUG if os.environ.get("VIDEO_DL_DEBUG", "").lower() in {"1", "true", "yes"} else logging.INFO
+)
 
 
 class DuplicateTaskError(ValueError):

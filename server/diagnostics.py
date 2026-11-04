@@ -44,13 +44,12 @@ def summarize_headers(headers: Mapping[str, str]) -> dict[str, str]:
 
 
 class YtdlpLogger:
-    def __init__(self, task_id: str, verbose: bool = False):
+    def __init__(self, task_id: str):
         self.task_id = task_id
-        self.verbose = verbose
 
     def debug(self, message: str) -> None:
-        level = logging.DEBUG if message.startswith("[debug]") and not self.verbose else logging.INFO
-        logger.log(level, "Task %s yt-dlp: %s", self.task_id, redact_message(message))
+        # yt-dlp sends both routine output and verbose diagnostics through debug().
+        logger.debug("Task %s yt-dlp: %s", self.task_id, redact_message(message))
 
     def warning(self, message: str) -> None:
         logger.warning("Task %s yt-dlp: %s", self.task_id, redact_message(message))

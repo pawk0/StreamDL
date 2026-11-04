@@ -442,12 +442,22 @@ async def events(request: Request):
 app = create_app()
 
 
+class StreamDLServer(uvicorn.Server):
+    async def shutdown(self, sockets=None):
+        # End SSE responses before Uvicorn waits for active requests to drain.
+        application = self.config.app
+        publisher = getattr(application.state, "publisher", None) if isinstance(application, FastAPI) else None
+        if publisher is not None:
+            await publisher.stop()
+        await super().shutdown(sockets=sockets)
+
+
 def run_server(port: int | None = None):
     settings = load_settings()
     if port is None:
         port = settings.get("port", 7921)
     print(f"StreamDL: http://localhost:{port}")
-    uvicorn.run(
+    config = uvicorn.Config(
         app,
         host="127.0.0.1",
         port=port,
@@ -455,6 +465,7 @@ def run_server(port: int | None = None):
         reload=False,
         timeout_graceful_shutdown=1,
     )
+    StreamDLServer(config).run()
 
 
 if __name__ == "__main__":

@@ -24,10 +24,14 @@ class QueuePublisher:
         self._subscribers: set[asyncio.Queue] = set()
         self._task: asyncio.Task | None = None
         self._last: dict | None = None
+        self._stopped = False
 
     async def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         async with self._lock:
+            if self._stopped:
+                queue.put_nowait(None)
+                return queue
             # Serialize fresh subscription snapshots against ongoing publication.
             snapshot = await asyncio.to_thread(self.snapshot)
             queue.put_nowait(snapshot)
@@ -68,11 +72,16 @@ class QueuePublisher:
                     queue.put_nowait(current)
 
     async def stop(self) -> None:
+        self._stopped = True
         if self._task:
             self._task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        for queue in self._subscribers:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(None)
         self._subscribers.clear()
 
     async def stream(self):
@@ -83,6 +92,8 @@ class QueuePublisher:
                     snapshot = await asyncio.wait_for(
                         queue.get(), timeout=self.heartbeat
                     )
+                    if snapshot is None:
+                        return
                     yield ServerSentEvent(event="queue", data=snapshot, retry=3000)
                 except TimeoutError:
                     yield ServerSentEvent(comment="heartbeat")
